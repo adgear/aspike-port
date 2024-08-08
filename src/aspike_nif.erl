@@ -36,6 +36,7 @@
     key_select/1,
     key_select/2,
     key_select/4,
+    key_select/5,
     key_remove/0,
     key_remove/1,
     key_remove/3,
@@ -78,7 +79,7 @@
     key_generation/3,
     key_put/4,
     key_remove/3,
-    key_select/4,
+    key_select/5,
     nif_node_random/0,
     nif_node_names/0,
     nif_node_get/1,
@@ -252,11 +253,14 @@ key_select(Lst) ->
 key_select(Key, Lst) ->
     key_select(?DEFAULT_NAMESPACE, ?DEFAULT_SET, Key, Lst).
 
+key_select(Namespace, Set, Key, Lst) ->
+  key_select(Namespace, Set, Key, Lst, false).
+
 % Gets value of Bin for Key in Namespace Set; here Lst is a list of [Bin].
--spec key_select(string(), string(), string(), [string()]) ->
+-spec key_select(string(), string(), string(), [string()], boolean()) ->
     {ok, [{string(), term()}]} | {error, string()}.
-key_select(Namespace, Set, Key, Lst) when
-    is_list(Namespace), is_list(Set), is_list(Key), is_list(Lst)
+key_select(Namespace, Set, Key, Lst, HandleStringAsBytes) when
+    is_list(Namespace), is_list(Set), is_list(Key), is_list(Lst), is_boolean(HandleStringAsBytes)
 ->
     not_loaded(?LINE).
 
