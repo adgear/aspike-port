@@ -273,7 +273,7 @@ key_select(Key, Lst) ->
     key_select(?DEFAULT_NAMESPACE, ?DEFAULT_SET, Key, Lst).
 
 key_select(Namespace, Set, Key, Lst) ->
-    key_select(Namespace, Set, Key, Lst, false).
+    key_select(Namespace, Set, Key, Lst, true).
 
 % Gets value of Bin for Key in Namespace Set; here Lst is a list of [Bin].
 -spec key_select(binary(), binary(), binary(), [binary()], boolean()) ->
