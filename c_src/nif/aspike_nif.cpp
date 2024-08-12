@@ -38,7 +38,6 @@
 #define MAX_SET_SIZE 64			// based on current server limit
 #define AS_BIN_NAME_MAX_SIZE 16
 #define MAX_BINS_NUMBER 1024
-#define MAX_ATOM_SIZE 1024
 
 #define USE_DIRTY 1
 #ifdef USE_DIRTY
@@ -906,22 +905,11 @@ ERL_NIF_TERM get_binaryb_asval(ErlNifEnv* env, const as_val * val) {
     return fcap_key;
 }
 
-static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value *val, bool handle_string_as_bytes = false) {
+static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value *val) {
     switch(type) {
         case AS_INTEGER:
             return enif_make_int64(env, val->integer.value);
         case AS_STRING:
-            if (handle_string_as_bytes == false) {
-              uint8_t * bin_as_str = (uint8_t *) val->string.value;
-              auto len = val->string.len;
-
-              unsigned char * val_data;
-              ERL_NIF_TERM res;
-              val_data = enif_make_new_binary(env, len, &res);
-              memcpy(val_data, bin_as_str, len);
-
-              return res;
-            }
         case AS_BYTES: {
             as_bytes asbval = val->bytes;
             uint8_t * bin_as_str = as_bytes_get(&asbval);
@@ -1000,7 +988,7 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
 
 
 
-static ERL_NIF_TERM dump_records(ErlNifEnv* env, const as_record *p_rec, bool handle_string_as_bytes = false) {
+static ERL_NIF_TERM dump_records(ErlNifEnv* env, const as_record *p_rec) {
     ERL_NIF_TERM res;
 
 	if (p_rec->key.valuep) {
@@ -1021,7 +1009,7 @@ static ERL_NIF_TERM dump_records(ErlNifEnv* env, const as_record *p_rec, bool ha
         uint type = as_bin_get_type(p_bin);
 		ERL_NIF_TERM cell = enif_make_tuple2(env,
             enif_make_string(env, name, ERL_NIF_UTF8),
-            format_value_out(env, type, as_record_get(p_rec, name), handle_string_as_bytes)
+            format_value_out(env, type, as_bin_get_value(p_bin))
             );
         res = enif_make_list_cell(env, cell, res);
 	}
@@ -1590,8 +1578,6 @@ static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
     char key_str[MAX_KEY_STR_SIZE];
-    char handle_string_as_bytes_atom[MAX_ATOM_SIZE];
-    bool handle_string_as_bytes;
     unsigned int length = 0;
     unsigned int i = 0;
     as_record* p_rec = NULL;
@@ -1609,10 +1595,6 @@ static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     if (!enif_is_list(env, list) || !enif_get_list_length(env, list, &length)) {
 	    return enif_make_badarg(env);
     }
-    if (!enif_get_atom(env, argv[4], handle_string_as_bytes_atom, MAX_ATOM_SIZE, ERL_NIF_LATIN1)) {
-	    return enif_make_badarg(env);
-    }
-    handle_string_as_bytes = (::strcmp(handle_string_as_bytes_atom, "false") != 0 && ::strcmp(handle_string_as_bytes_atom, "nil") != 0)? true : false;
     CHECK_ALL
 
     ERL_NIF_TERM rc, msg;
@@ -1649,7 +1631,7 @@ static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
         return enif_make_tuple2(env, rc, msg);
     }
 
-    msg = dump_records(env, p_rec, handle_string_as_bytes);
+    msg = dump_records(env, p_rec);
     rc = erl_ok;
     for (uint j = 0; j < i; j++) {
         delete(bins[j]);
@@ -1986,7 +1968,7 @@ static ErlNifFunc nif_funcs[] = {
     NIF_FUN("cdt_delete_by_keys", 5, cdt_delete_by_keys),
     NIF_FUN("cdt_delete_by_keys_batch", 4, cdt_delete_by_keys_batch),
     NIF_FUN("key_remove", 3, key_remove),
-    NIF_FUN("key_select", 5, key_select),
+    NIF_FUN("key_select", 4, key_select),
     NIF_FUN("nif_node_random", 0, node_random),
     NIF_FUN("nif_node_names", 0, node_names),
     NIF_FUN("nif_node_get", 1, node_get),

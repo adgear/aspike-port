@@ -78,7 +78,6 @@
     key_select/1,
     key_select/2,
     key_select/4,
-    key_select/5,
     key_remove/0,
     key_remove/1,
     key_remove/3,
@@ -272,16 +271,13 @@ key_select(Lst) ->
 key_select(Key, Lst) ->
     key_select(?DEFAULT_NAMESPACE, ?DEFAULT_SET, Key, Lst).
 
-key_select(Namespace, Set, Key, Lst) ->
-    key_select(Namespace, Set, Key, Lst, false).
-
 % Gets value of Bin for Key in Namespace Set; here Lst is a list of [Bin].
--spec key_select(string(), string(), string(), [string()], boolean()) ->
+-spec key_select(string(), string(), string(), [string()]) ->
     {ok, [{string(), term()}]} | {error, string()}.
-key_select(Namespace, Set, Key, Lst, HandleStringAsBytes) when
-    is_list(Namespace), is_list(Set), is_list(Key), is_list(Lst), is_boolean(HandleStringAsBytes)
+key_select(Namespace, Set, Key, Lst) when
+    is_list(Namespace), is_list(Set), is_list(Key), is_list(Lst)
 ->
-    command({key_select, Namespace, Set, Key, Lst, HandleStringAsBytes}).
+    command({key_select, Namespace, Set, Key, Lst}).
 
 key_get() ->
     key_get(?DEFAULT_KEY).
