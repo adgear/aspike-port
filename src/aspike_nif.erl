@@ -254,13 +254,13 @@ key_select(Key, Lst) ->
     key_select(?DEFAULT_NAMESPACE, ?DEFAULT_SET, Key, Lst).
 
 key_select(Namespace, Set, Key, Lst) ->
-  key_select(Namespace, Set, Key, Lst, false).
+  key_select(Namespace, Set, Key, Lst, true).
 
 % Gets value of Bin for Key in Namespace Set; here Lst is a list of [Bin].
--spec key_select(string(), string(), string(), [string()], boolean()) ->
-    {ok, [{string(), term()}]} | {error, string()}.
+-spec key_select(binary(), binary(), binary(), [binary()], boolean()) ->
+    {ok, [{binary(), term()}]} | {error, binary()}.
 key_select(Namespace, Set, Key, Lst, HandleStringAsBytes) when
-    is_list(Namespace), is_list(Set), is_list(Key), is_list(Lst), is_boolean(HandleStringAsBytes)
+    is_binary(Namespace), is_binary(Set), is_binary(Key), is_list(Lst), is_boolean(HandleStringAsBytes)
 ->
     not_loaded(?LINE).
 

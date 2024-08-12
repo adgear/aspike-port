@@ -906,7 +906,7 @@ ERL_NIF_TERM get_binaryb_asval(ErlNifEnv* env, const as_val * val) {
     return fcap_key;
 }
 
-static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value *val, bool handle_string_as_bytes = false) {
+static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value *val, bool handle_string_as_bytes = true) {
     switch(type) {
         case AS_INTEGER:
             return enif_make_int64(env, val->integer.value);
@@ -1000,7 +1000,7 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
 
 
 
-static ERL_NIF_TERM dump_records(ErlNifEnv* env, const as_record *p_rec, bool handle_string_as_bytes = false) {
+static ERL_NIF_TERM dump_records(ErlNifEnv* env, const as_record *p_rec, bool handle_string_as_bytes = true) {
     ERL_NIF_TERM res;
 
 	if (p_rec->key.valuep) {
@@ -1587,32 +1587,39 @@ static ERL_NIF_TERM binary_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 
 static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-    char name_space[MAX_NAMESPACE_SIZE];
-    char set[MAX_SET_SIZE];
-    char key_str[MAX_KEY_STR_SIZE];
+    ErlNifBinary bin_ns, bin_set, bin_key;
+    std::string name_space, aspk_set, aspk_key;
     char handle_string_as_bytes_atom[MAX_ATOM_SIZE];
     bool handle_string_as_bytes;
     unsigned int length = 0;
     unsigned int i = 0;
     as_record* p_rec = NULL;
 
-    if (!enif_get_string(env, argv[0], name_space, MAX_NAMESPACE_SIZE, ERL_NIF_UTF8)) {
+    if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
 	    return enif_make_badarg(env);
     }
-    if (!enif_get_string(env, argv[1], set, MAX_SET_SIZE, ERL_NIF_UTF8)) {
-	    return enif_make_badarg(env);
+    name_space.assign((const char*) bin_ns.data, bin_ns.size);
+
+    if (!enif_inspect_binary(env, argv[1], &bin_set)) {
+      return enif_make_badarg(env);
     }
-    if (!enif_get_string(env, argv[2], key_str, MAX_KEY_STR_SIZE, ERL_NIF_UTF8)) {
-	    return enif_make_badarg(env);
+    aspk_set.assign((const char*) bin_set.data, bin_set.size);
+
+    if (!enif_inspect_binary(env, argv[2], &bin_key)) {
+      return enif_make_badarg(env);
     }
+    aspk_key.assign((const char*) bin_key.data, bin_key.size);
+
     ERL_NIF_TERM list = argv[3];
     if (!enif_is_list(env, list) || !enif_get_list_length(env, list, &length)) {
 	    return enif_make_badarg(env);
     }
+
     if (!enif_get_atom(env, argv[4], handle_string_as_bytes_atom, MAX_ATOM_SIZE, ERL_NIF_LATIN1)) {
 	    return enif_make_badarg(env);
     }
-    handle_string_as_bytes = (::strcmp(handle_string_as_bytes_atom, "false") != 0 && ::strcmp(handle_string_as_bytes_atom, "nil") != 0)? true : false;
+    handle_string_as_bytes = (::strcmp(handle_string_as_bytes_atom, "false") != 0)? true : false;
+
     CHECK_ALL
 
     ERL_NIF_TERM rc, msg;
@@ -1627,21 +1634,23 @@ static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     for (; i < length; i++) {
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
-        char bin[AS_BIN_NAME_MAX_SIZE] = {0};
+        ErlNifBinary bin_bin;
+        std::string bin;
         if (!enif_get_list_cell(env, list, &head, &tail)) {
             break;
         }
-        if(!enif_get_string(env, head, bin, MAX_KEY_STR_SIZE, ERL_NIF_UTF8)){
+        if(!enif_inspect_binary(env, head, &bin_bin)){
             break;
         }
-        bins[i] = strdup(bin);
+        bin.assign((const char*) bin_bin.data, bin_bin.size);
+        bins[i] = strdup(bin.c_str());
         list = tail;
     }
     bins[i] = NULL;
 
-	as_error err;
+	  as_error err;
     as_key key;
-	as_key_init_str(&key, name_space, set, key_str);
+	  as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
     if (aerospike_key_select(&as, &err, NULL, &key, bins, &p_rec)  != AEROSPIKE_OK) {
         rc = erl_error;
