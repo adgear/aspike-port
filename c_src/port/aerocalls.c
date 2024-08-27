@@ -1763,16 +1763,13 @@ int get_fcaps(const char *buf, int *index, int fcap_list_length, const char* bin
    int term_type;
    long len;
 
-   logfile("CPCP - GB1 - GF1: " + std::to_string(fcap_list_length));
    for (int i = 0; i < (fcap_list_length / 3); i++) {
-        logfile("CPCP - GB1 - GF1.1: " + std::to_string(i));
         if (ei_get_type(buf, index, &term_type, &term_size) < 0 || term_type != ERL_BINARY_EXT)
             { return 2; }
         char fcap_key[term_size + 1];
         if (ei_decode_binary(buf, index, fcap_key, &len) < 0) 
             { return 3; }
         fcap_key[len] = '\0';
-        logfile("CPCP - GB1 - GF2: " + std::string(fcap_key));
         mycdt.fcap_key = std::string(fcap_key);
 
         if (ei_get_type(buf, index, &term_type, &term_size) < 0 || term_type != ERL_BINARY_EXT)
@@ -1781,20 +1778,16 @@ int get_fcaps(const char *buf, int *index, int fcap_list_length, const char* bin
         if (ei_decode_binary(buf, index, fcap_val, &len) < 0) 
             { return 5; }
         fcap_val[len] = '\0';
-        logfile("CPCP - GB1 - GF3: " + std::string(fcap_val));
         mycdt.fcap_val = std::string(fcap_val);
 
         if (ei_get_type(buf, index, &term_type, &term_size) < 0 || !( term_type == ERL_SMALL_INTEGER_EXT || term_type == ERL_INTEGER_EXT ))
             { return 6; }
         long fcap_ttl;
         ei_decode_long(buf, index, &fcap_ttl);
-        logfile("CPCP - GB1 - GF4: " + std::to_string(fcap_ttl));
         mycdt.fcap_ttl = fcap_ttl;
    }
-   logfile("CPCP - GB1 - GF5");
             int fll;
             ei_decode_list_header(buf, index, &fll);
-   logfile("CPCP - GB1 - GF6");
    return 0;
 }
 
@@ -1803,7 +1796,6 @@ int get_bins(const char *buf, int *index, int bin_list_length, cdtPutStruct &myc
    int term_size;
    int term_type;
    long len;
-   logfile("CPCP - GB1: " + std::to_string(bin_list_length));
    for (int i = 0; i < bin_list_length; i++) {
         int tuple_len; 
         ei_decode_tuple_header(buf, index, &tuple_len);
@@ -1816,7 +1808,6 @@ int get_bins(const char *buf, int *index, int bin_list_length, cdtPutStruct &myc
                 { return 3; }
             bin_name[len] = '\0';
             mycdt.bin_name = std::string(bin_name);
-            logfile("CPCP - GB: " + std::string(bin_name));
 
             // now list of [fcap_key, fcap_val, fcap_ttl]
             if (ei_get_type(buf, index, &term_type, &term_size) < 0 || term_type != ERL_LIST_EXT)
@@ -1826,7 +1817,6 @@ int get_bins(const char *buf, int *index, int bin_list_length, cdtPutStruct &myc
                 { return 5; }
 
             int ret = get_fcaps(buf, index, fcap_list_length, bin_name, mycdt);
-            logfile("CPCP - GB: done " + std::to_string(ret));
 
         } else {
             return 1;
@@ -1850,7 +1840,6 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
     if (ei_decode_binary(buf, index, ns, &len) < 0) 
         {STOPERROR("CPCP invalid first argument: namespace")}
     ns[len] = '\0'; 
-    logfile("CPCP2");
 
     if (ei_get_type(buf, index, &term_type, &term_size) < 0 || term_type != ERL_BINARY_EXT)
     	{STOPERROR("CPCP invalid namespace bytestring size")}
@@ -1858,7 +1847,6 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
     if (ei_decode_binary(buf, index, aspk_set, &len) < 0) 
         {STOPERROR("CPCP invalid second argument: set")}
     aspk_set[len] = '\0'; 
-    logfile("CPCP3");
 
     if (ei_get_type(buf, index, &term_type, &term_size) < 0 || term_type != ERL_BINARY_EXT)
     	{STOPERROR("CPCP invalid namespace bytestring size")}
@@ -1866,7 +1854,6 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
     if (ei_decode_binary(buf, index, aspk_key, &len) < 0) 
         {STOPERROR("CPCP invalid third argument: key")}
     aspk_key[len] = '\0'; 
-    logfile("CPCP4");
 
     //4-th arg: [ {bin_name, [fcap_key, fcap_val, fcap_ttl]}, ..... ]
     if (ei_get_type(buf, index, &term_type, &term_size) < 0 || term_type != ERL_LIST_EXT)
@@ -1874,15 +1861,13 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
     int bin_list_length;
     if(ei_decode_list_header(buf, index, &bin_list_length) < 0)
         {STOPERROR("invalid list of bins")}
-    logfile("CPCP5");
 
     as_cdt_ctx ctx;
     as_cdt_ctx_inita(&ctx, 1);
     as_operations ops;
+    as_operations_inita(&ops, 2);
     cdtPutStruct mycdt; 
-    int gbret = get_bins(buf, index, bin_list_length, mycdt);
-    logfile("CPCP5 done: " + std::to_string(gbret));
-    logfile("DATA:" + mycdt.bin_name + ", " + mycdt.fcap_key + ", " + mycdt.fcap_val + ", " + std::to_string(mycdt.fcap_ttl) );
+    get_bins(buf, index, bin_list_length, mycdt);
         
     if (ei_get_type(buf, index, &term_type, &term_size) < 0 || !( term_type == ERL_SMALL_INTEGER_EXT || term_type == ERL_INTEGER_EXT ))
         { 
@@ -1890,7 +1875,6 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
             return 6; }
     long record_ttl;
     ei_decode_long(buf, index, &record_ttl);
-    logfile("CPCP6");
 
 
     // {max_retries, sleep_between_retries, socket_timeout, total_timeout}
@@ -1915,9 +1899,7 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
     	{STOPERROR("CPCP invalid policy4")}
     ei_decode_long(buf, index, &total_timeout);
 
-    logfile("CPCP7");
     CHECK_ALL
-    logfile("CPCP8");
 
 	as_error err;
     as_key key;
@@ -1937,14 +1919,12 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
     p.base.sleep_between_retries = sleep_between_retries;
     p.base.socket_timeout = socket_timeout;
     p.base.total_timeout = total_timeout;
-    logfile("CPCP9");
         
         as_map_policy put_mode;
         as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
         as_string key_str;
         as_string_init(&key_str, (char*)mycdt.fcap_key.c_str(), false);
         as_cdt_ctx_add_map_key_create(&ctx, (as_val*)&key_str, AS_MAP_KEY_ORDERED);
-    logfile("CPCP9.1");
         as_string subkey1;            
         std::string valuesk("value"); 
         as_string_init(&subkey1, (char*)valuesk.c_str(), false);
@@ -1952,23 +1932,18 @@ int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out) {
         as_bytes_inita(&subval1, mycdt.fcap_val.length());
         as_bytes_set(&subval1, 0, (const uint8_t*)mycdt.fcap_val.c_str(), mycdt.fcap_val.length());
         as_operations_map_put(&ops, mycdt.bin_name.c_str(), &ctx, &put_mode, (as_val*)&subkey1, (as_val*)&subval1);
-    logfile("CPCP9.2");
         std::string valuesk1("ttl");
         as_string subkey2;
         as_integer subval2;
         as_string_init(&subkey2, (char*)valuesk1.c_str(), false);
         as_integer_init(&subval2, mycdt.fcap_ttl);
         as_operations_map_put(&ops, mycdt.bin_name.c_str(), &ctx, &put_mode, (as_val*)&subkey2, (as_val*)&subval2);
-    logfile("CPCP9.3");
 
     if(aerospike_key_operate(&as, &err, &p, &key, &ops, &rec1) != AEROSPIKE_OK){
-        logfile("CPCP10");
         STOPERROR(err.message)
     } else {
-        logfile("CPCP11");
         as_record_destroy(&rec);
     }
-    logfile("CPCP12");
     as_operations_destroy(&ops);
     as_key_destroy(&key);
     

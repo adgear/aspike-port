@@ -24,7 +24,9 @@
    cdt_insert_test/5,
    cdt_del_test/5,
    cdt_del_batch_test/5,
-   cdt_get_test/4
+   cdt_get_test/4,
+   pool_cdt_insert/1,
+   pool_cdt_read/1
 ]).
 
 
@@ -387,3 +389,18 @@ dump_stats() ->
    erlang:put(read_stats, []),
    erlang:put(insert_stats, []),
    ok.
+
+pool_cdt_insert(0) -> ok;
+pool_cdt_insert(N) when is_integer(N), N > 0 ->
+    Key = integer_to_binary(N),
+    Value = base64:encode(crypto:strong_rand_bytes(40)),
+    aspike_srv_worker:cdt_put(<<"test">>, <<"rtb-gateway-fcap-users2">>, 
+        Key, [{<<"fcap_map">>, [<<"campaign.111">>, Value, 777]}], 6000),
+    pool_cdt_insert(N-1).
+
+pool_cdt_read(0) -> ok;
+pool_cdt_read(N) ->
+    Key = integer_to_binary(N),
+    aspike_srv_worker:cdt_get(<<"test">>, <<"rtb-gateway-fcap-users2">>, Key),
+    pool_cdt_read(N - 1).
+
