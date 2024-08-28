@@ -63,7 +63,9 @@
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
     cdt_put/5,
-    cdt_put/6
+    cdt_put/6,
+    segment_tag_get/4,
+    segment_tag_get/3
 ]).
 
 -nifs([
@@ -96,7 +98,8 @@
     cdt_expire/4,
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
-    cdt_put/6
+    cdt_put/6,
+    segment_tag_get/4
 ]).
 
 % -------------------------------------------------------------------------------
@@ -274,6 +277,11 @@ key_get(Namespace, Set, Key) when is_list(Namespace), is_list(Set), is_list(Key)
 % Gets values of all Bin for Key in Namespace Set.
 -spec binary_get(binary(), binary(), binary()) -> {ok, [{binary(), term()}]} | {error, string()}.
 binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_binary(Key) ->
+    not_loaded(?LINE).
+
+segment_tag_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_binary(Key) ->
+    segment_tag_get(Namespace, Set, Key, <<"mu_sgm_id_ls">>).
+segment_tag_get(Namespace, Set, Key, Tag) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(Tag) ->
     not_loaded(?LINE).
 
 cdt_get(Namespace, Set, Key) ->
