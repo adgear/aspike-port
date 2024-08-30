@@ -1618,7 +1618,7 @@ static ERL_NIF_TERM segment_tag_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM
     as_key key;
     as_record* p_rec = NULL;
 
-    static const char* bins[] = {aspk_columns.c_str(), NULL};
+    const char* bins[] = {aspk_columns.c_str(), NULL};
 
     as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
