@@ -1816,7 +1816,7 @@ int get_bins(const char *buf, int *index, int bin_list_length, cdtPutStruct &myc
             if(ei_decode_list_header(buf, index, &fcap_list_length) < 0)
                 { return 5; }
 
-            int ret = get_fcaps(buf, index, fcap_list_length, bin_name, mycdt);
+            (void)get_fcaps(buf, index, fcap_list_length, bin_name, mycdt);
 
         } else {
             return 1;

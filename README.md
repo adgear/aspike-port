@@ -1,19 +1,32 @@
-### buld
+## Build
 
-You need the aerospike client installed on your machine, something like this (for Ubuntu/Debian):
+You need the aerospike client installed on your machine, which requires
+two client libraries:
+
+* libev
+* aerospike-client-c-libev
+
+### For Ubuntu/Debian:
 ```bash
 wget https://download.aerospike.com/artifacts/aerospike-client-c/6.5.1/aerospike-client-c-libev_6.5.1_debian11_x86_64.tgz
 tar xvf aerospike-client-c-libev_6.5.1_debian11_x86_64.tgz
 cd aerospike-client-c-libev_6.5.1_debian11_x86_64
 dpkg -i aerospike-client-c-libev-devel_6.5.1-debian11_amd64.deb aerospike-client-c-libev_6.5.1-debian11_amd64.deb
 ```
-after just run rebar3:
 
+### For Arch Linux:
 ```bash
-./rebar3 compile
+$ pacman -S libev
+$ pacaur -S aerospike-client-c-libev
 ```
 
-### Run perf tests
+after installation, run rebar3:
+
+```bash
+$ make
+```
+
+## Run perf tests
 
 To start the Aerospike client, run these commands in erlang shell
 
@@ -27,7 +40,7 @@ aspike_nif:host_add().
 aspike_nif:connect().
 ```
 
-#### Single process tests
+### Single process tests
 
 To run a single producer process:
 ```erlang
@@ -48,7 +61,7 @@ aspike_nif_perf:dump_stats().
 ```
 it will produce 2 files: /tmp/read_stats.txt and /tmp/insert_stats.txt
 
-#### Multi-process tests
+### Multi-process tests
 
 ```erlang
 aspike_nif_perf:mp_insert(10, 1_000_000, 0).
