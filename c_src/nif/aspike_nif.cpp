@@ -5,7 +5,6 @@
 #include <utility>
 #include <iostream>
 #include <vector>
-#include <chrono>
 
 #include <aerospike/aerospike.h>
 #include <aerospike/aerospike_info.h>
@@ -381,7 +380,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
             return enif_make_badarg(env);
         }
         auto ts_list = tuple[1];
-        as_operations_inita(&ops, 3);
+        as_operations_inita(&ops, 2);
         if(ttl != 0){
             ops.ttl = ttl;
         } else {
@@ -389,10 +388,10 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         }
         uint opnum = 0;
         ErlNifBinary bin_key, bin_val;
-        as_string key_str, subkey1, subkey2, subkey3;
+        as_string key_str, subkey1, subkey2;
         as_bytes subval1;
-        as_integer subval2, subval3;
-        std::string fcap_key, fcap_val, valuesk, valuesk1, valuesk2;
+        as_integer subval2;
+        std::string fcap_key, fcap_val, valuesk, valuesk1;
         long i64;
         for (uint ts_i = 0; ts_i < ts_length; ts_i++) {
             ERL_NIF_TERM ts_head;
@@ -431,13 +430,6 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                     as_operations_map_put(&ops, bin_str.c_str(), &ctx, &put_mode, (as_val*)&subkey2, (as_val*)&subval2);
                 }
                 opnum=0;
-                //subkey write time
-                auto now = std::chrono::system_clock::now().time_since_epoch();
-                long wt = std::chrono::duration_cast<std::chrono::seconds>(now).count();
-                valuesk2 = "wt";
-                as_string_init(&subkey3, (char*)valuesk2.c_str(), false);
-                as_integer_init(&subval3, wt);
-                as_operations_map_put(&ops, bin_str.c_str(), &ctx, &put_mode, (as_val*)&subkey3, (as_val*)&subval3);
                 break;
             }else{
                 break;
@@ -970,9 +962,7 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                 const as_orderedmap *vmap = (const as_orderedmap*)as_map_fromval(as_pair_2(apr));
                 as_orderedmap_iterator iti_int;
                 as_orderedmap_iterator_init(&iti_int, vmap);
-                ERL_NIF_TERM vnt = enif_make_atom(env, "undefined");
-                ERL_NIF_TERM ttlsm = enif_make_int64(env, 0);
-                ERL_NIF_TERM writetime = enif_make_int64(env, 0);
+                ERL_NIF_TERM vnt, ttlsm;
                 while ( as_orderedmap_iterator_has_next(&iti_int) ) {
                     const as_val* valsm = as_orderedmap_iterator_next(&iti_int);
                     as_pair * aprsm = as_pair_fromval(valsm);
@@ -980,12 +970,7 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                         vnt = get_binaryb_asval(env, as_pair_2(aprsm));
                         fccount++;
                     }else if(as_pair_2(aprsm)->type == 3){
-                        auto smkey = as_string_get((as_string*)as_pair_1(aprsm));
-                        if(strcmp(smkey,"ttl") == 0){
-                            ttlsm = enif_make_int64(env, as_integer_get((as_integer*)as_pair_2(aprsm)));
-                        }else if(strcmp(smkey,"wt") == 0) {
-                            writetime = enif_make_int64(env, as_integer_get((as_integer*)as_pair_2(aprsm)));
-                        }
+                        ttlsm = enif_make_int64(env, as_integer_get((as_integer*)as_pair_2(aprsm)));
                         fccount++;
                     }else if(as_pair_2(aprsm)->type == 4){
                         vnt = get_binary_asval(env, as_pair_2(aprsm));
@@ -993,8 +978,8 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                     }
                 }
                 as_orderedmap_iterator_destroy(&iti_int);
-                if((fccount == 2) || (fccount == 3)){
-                    erl_list->push_back(enif_make_tuple3(env, vnt, ttlsm, writetime));
+                if(fccount == 2){
+                    erl_list->push_back(enif_make_tuple2(env, vnt, ttlsm));
                 }
             }
             as_orderedmap_iterator_destroy(&it);
