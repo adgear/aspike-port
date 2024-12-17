@@ -347,8 +347,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         rec.ttl = ttl;
     }
         
-    as_cdt_ctx ctx;
-    as_cdt_ctx_inita(&ctx, 1);
+    std::vector<as_cdt_ctx*> ctx_vec; 
     as_operations ops;
     as_map_policy put_mode;
     //as_map_policy_set(&put_mode, AS_MAP_UNORDERED, AS_MAP_UPDATE);
@@ -381,7 +380,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
             return enif_make_badarg(env);
         }
         auto ts_list = tuple[1];
-        as_operations_inita(&ops, 3);
+        as_operations_inita(&ops, ts_length + 1);
         if(ttl != 0){
             ops.ttl = ttl;
         } else {
@@ -403,22 +402,21 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
             
             if(opnum == 0){
                 //getting fcap key
+                ctx_vec.push_back(as_cdt_ctx_create(1));
                 if (enif_inspect_binary(env, ts_head, &bin_key)) {
                     fcap_key.assign((const char*) bin_key.data, bin_key.size);
                     as_string_init(&key_str, (char*)fcap_key.c_str(), false);
-                    as_cdt_ctx_add_map_key_create(&ctx, (as_val*)&key_str, AS_MAP_KEY_ORDERED);
+                    as_cdt_ctx_add_map_key_create(ctx_vec.back(), (as_val*)&key_str, AS_MAP_KEY_ORDERED);
                 }
                 opnum++;
             }else if(opnum == 1){
                 //getting fcap value
                 if (enif_inspect_binary(env, ts_head, &bin_val)) {
-                    //fcap_val.assign((const char*) bin_val.data, bin_val.size);
                     valuesk = "value";
                     as_string_init(&subkey1, (char*)valuesk.c_str(), false);
-                    //as_string_init(&subval1, (char*)fcap_val.c_str(), false);
                     as_bytes_inita(&subval1, bin_val.size);
                     as_bytes_set(&subval1, 0, bin_val.data, bin_val.size);
-                    as_operations_map_put(&ops, bin_str.c_str(), &ctx, &put_mode, (as_val*)&subkey1, (as_val*)&subval1);
+                    as_operations_map_put(&ops, bin_str.c_str(), ctx_vec.back(), &put_mode, (as_val*)&subkey1, (as_val*)&subval1);
                 }
                 opnum++;
 
@@ -428,7 +426,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                     valuesk1 = "ttl";
                     as_string_init(&subkey2, (char*)valuesk1.c_str(), false);
                     as_integer_init(&subval2, i64);
-                    as_operations_map_put(&ops, bin_str.c_str(), &ctx, &put_mode, (as_val*)&subkey2, (as_val*)&subval2);
+                    as_operations_map_put(&ops, bin_str.c_str(), ctx_vec.back(), &put_mode, (as_val*)&subkey2, (as_val*)&subval2);
                 }
                 opnum=0;
                 //subkey write time
@@ -437,8 +435,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
                 valuesk2 = "wt";
                 as_string_init(&subkey3, (char*)valuesk2.c_str(), false);
                 as_integer_init(&subval3, wt);
-                as_operations_map_put(&ops, bin_str.c_str(), &ctx, &put_mode, (as_val*)&subkey3, (as_val*)&subval3);
-                break;
+                as_operations_map_put(&ops, bin_str.c_str(), ctx_vec.back(), &put_mode, (as_val*)&subkey3, (as_val*)&subval3);
             }else{
                 break;
             }
@@ -492,7 +489,11 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     }
     as_operations_destroy(&ops);
     as_key_destroy(&key);
-
+    
+    //destroy all contexts
+    for (as_cdt_ctx* pctx : ctx_vec){
+        as_cdt_ctx_destroy(pctx);
+    }
 
 
     return enif_make_tuple2(env, rc, msg);
