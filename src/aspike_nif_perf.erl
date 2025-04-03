@@ -27,12 +27,25 @@
    cdt_del_batch_test/5,
    cdt_get_test/4,
    pool_cdt_insert/1,
-   pool_cdt_read/1
+   pool_cdt_read/1,
+   
+   cdt_meml1_test/1
 ]).
 
 
 -define(FCAP_BIN, <<"fcap_map">>).
 
+
+
+cdt_meml1_test(N) ->
+    aspike_nif:cdt_put(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>, 
+        [{<<"fcap_map">>, [<<"campaign1">>, <<"dasdasdasd1">>, 777, <<"campaign2">>, <<"dasdasdasd2">>, 777]}], 300),
+    aspike_nif:cdt_delete_by_keys(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>, <<"fcap_map">>, [<<"campaign1">>, <<"campaign2">>] ),
+    cdt_meml1_int(N).
+cdt_meml1_int(0) -> ok;
+cdt_meml1_int(N) ->
+    _R = aspike_nif:cdt_get(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>),
+    cdt_meml1_int(N - 1).
 
 
 cdt_del_test(0, _, _, _, _) -> ok;
