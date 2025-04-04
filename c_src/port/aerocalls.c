@@ -1111,8 +1111,8 @@ static void format_value_out(ei_x_buff *p_res_buf, as_val_t type, as_bin_value *
 
 
             /*auto len = as_map_size((as_map *)(&val->map));
-	        std::vector<ERL_NIF_TERM> * erl_list = new std::vector<ERL_NIF_TERM>();
-	        erl_list->reserve(len*2);
+	        std::vector<ERL_NIF_TERM> erl_list;
+	        erl_list.reserve(len*2);
             
             const as_orderedmap *amap = (const as_orderedmap*)&val->map;
             as_orderedmap_iterator it;
@@ -1121,7 +1121,7 @@ static void format_value_out(ei_x_buff *p_res_buf, as_val_t type, as_bin_value *
                 long fccount = 0;
                 const as_val* val = as_orderedmap_iterator_next(&it);
                 as_pair * apr = as_pair_fromval(val);
-                erl_list->push_back(get_binary_asval(env, as_pair_1(apr)));
+                erl_list.push_back(get_binary_asval(env, as_pair_1(apr)));
 
                 const as_orderedmap *vmap = (const as_orderedmap*)as_map_fromval(as_pair_2(apr));
                 as_orderedmap_iterator iti_int;
@@ -1143,16 +1143,14 @@ static void format_value_out(ei_x_buff *p_res_buf, as_val_t type, as_bin_value *
                 }
                 as_orderedmap_iterator_destroy(&iti_int);
                 if(fccount == 2){
-                    erl_list->push_back(enif_make_tuple2(env, vnt, ttlsm));
+                    erl_list.push_back(enif_make_tuple2(env, vnt, ttlsm));
                 }
             }
             as_orderedmap_iterator_destroy(&it);
-            if(erl_list->size() == 0){
+            if(erl_list.size() == 0){
                 return enif_make_list(env, 0);
             } else {
-	            auto dlret = enif_make_list_from_array(env, erl_list->data(), erl_list->size());
-                delete erl_list;
-                return dlret;
+	            return = enif_make_list_from_array(env, erl_list.data(), erl_list.size());
             }*/
         }break;
         default:

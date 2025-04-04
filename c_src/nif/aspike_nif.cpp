@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <assert.h>
 
 #include <aerospike/aerospike.h>
 #include <aerospike/aerospike_info.h>
@@ -54,14 +55,6 @@ static bool is_aerospike_initialised = false;
 static bool is_connected = false;
 static ERL_NIF_TERM erl_error;
 static ERL_NIF_TERM erl_ok;
-
-// ----------------------------------------------------------------------------
-
-typedef struct {
-    ErlNifEnv* env;
-    uint32_t count;
-    void *udata;
-} conversion_data;
 
 // ----------------------------------------------------------------------------
 
@@ -894,19 +887,6 @@ static ERL_NIF_TERM key_remove(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
 }
 
 
-static bool list_to_termlist_each(as_val *val, void *udata){
-    if (!val) {
-        return false;
-    }
-
-    conversion_data *convd = (conversion_data *)udata;
-    std::vector<ERL_NIF_TERM> *erl_list = (std::vector<ERL_NIF_TERM> *)convd->udata;
-    erl_list->push_back( enif_make_int64(convd->env, as_integer_get((as_integer*)val)) );
-
-    convd->count++;
-    return true;
-}
-
 ERL_NIF_TERM get_binary_asval(ErlNifEnv* env, const as_val * val) {
     ERL_NIF_TERM fcap_key;
     as_string *keystr = as_string_fromval(val);
@@ -944,20 +924,30 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
             return res;
         }break;
         case AS_LIST: {
-            auto len = as_list_size((as_list *)(&val->list));
-	        std::vector<ERL_NIF_TERM> * erl_list = new std::vector<ERL_NIF_TERM>();
-	        erl_list->reserve(len);
+            auto len = as_list_size(&val->list);
+	        std::vector<ERL_NIF_TERM> erl_list;
+	        erl_list.reserve(len);
 
-            conversion_data convd = {
-                .env = env, .count = 0, .udata = erl_list};
+            using Callback = std::function<bool (as_val *val)>;
 
-            as_list_foreach((as_list *)(&val->list), list_to_termlist_each, &convd);
-	        return enif_make_list_from_array(env, erl_list->data(), len);
+            Callback lambda = [&erl_list, env] (as_val *val) -> bool {
+                if (!val) return false;
+                as_integer *intval = as_integer_fromval(val);
+                assert(intval);
+                erl_list.push_back( enif_make_int64(env, as_integer_get(intval)) );
+                return true;
+            };
+
+            as_list_foreach(&val->list, [] (as_val *val, void *ctx) -> bool {
+                return (*(reinterpret_cast<Callback*>(ctx)))(val);
+            }, &lambda);
+
+	        return enif_make_list_from_array(env, erl_list.data(), len);
         }break;
         case AS_MAP: {
             auto len = as_map_size((as_map *)(&val->map));
-	        std::vector<ERL_NIF_TERM> * erl_list = new std::vector<ERL_NIF_TERM>();
-	        erl_list->reserve(len*2);
+	        std::vector<ERL_NIF_TERM> erl_list;
+	        erl_list.reserve(len*2);
             
             const as_orderedmap *amap = (const as_orderedmap*)&val->map;
             as_orderedmap_iterator it;
@@ -966,7 +956,7 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                 long fccount = 0;
                 const as_val* val = as_orderedmap_iterator_next(&it);
                 as_pair * apr = as_pair_fromval(val);
-                erl_list->push_back(get_binary_asval(env, as_pair_1(apr)));
+                erl_list.push_back(get_binary_asval(env, as_pair_1(apr)));
 
                 const as_orderedmap *vmap = (const as_orderedmap*)as_map_fromval(as_pair_2(apr));
                 as_orderedmap_iterator iti_int;
@@ -995,16 +985,14 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                 }
                 as_orderedmap_iterator_destroy(&iti_int);
                 if((fccount == 2) || (fccount == 3)){
-                    erl_list->push_back(enif_make_tuple3(env, vnt, ttlsm, writetime));
+                    erl_list.push_back(enif_make_tuple3(env, vnt, ttlsm, writetime));
                 }
             }
             as_orderedmap_iterator_destroy(&it);
-            if(erl_list->size() == 0){
+            if(erl_list.size() == 0){
                 return enif_make_list(env, 0);
             } else {
-	            auto dlret = enif_make_list_from_array(env, erl_list->data(), erl_list->size());
-                delete erl_list;
-                return dlret;
+	        return enif_make_list_from_array(env, erl_list.data(), erl_list.size());
             }
         }break;
         default:
@@ -1365,17 +1353,16 @@ static ERL_NIF_TERM cdt_delete_by_keys_batch(ErlNifEnv* env, int argc, const ERL
     as_error err;
 	as_status status = aerospike_batch_write(&as, &err, NULL, &recs);
 
-	std::vector<ERL_NIF_TERM> * erl_list = new std::vector<ERL_NIF_TERM>();
+	std::vector<ERL_NIF_TERM> erl_list;
     for(auto aitr : abwrs){
-        erl_list->push_back(enif_make_int(env, aitr->result));
+        erl_list.push_back(enif_make_int(env, aitr->result));
         /*if(aitr->result == AEROSPIKE_OK){
             std::cout << "WOPOK! \r\n";
         }else{
             std::cout << "WOPNOK!: " << std::to_string(aitr->result) << "\r\n";
         }*/
     }
-    auto opsl = enif_make_list_from_array(env, erl_list->data(), erl_list->size());
-    delete erl_list;
+    auto opsl = enif_make_list_from_array(env, erl_list.data(), erl_list.size());
 
     for(auto vitr : wopsl){
         as_operations_destroy(&vitr);
