@@ -6,6 +6,7 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <functional>
 #include <assert.h>
 
 #include <aerospike/aerospike.h>
