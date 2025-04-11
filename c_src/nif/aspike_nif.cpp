@@ -51,6 +51,7 @@
 
 // ----------------------------------------------------------------------------
 
+static as_config config;
 static aerospike as;
 static bool is_aerospike_initialised = false;
 static bool is_connected = false;
@@ -94,16 +95,18 @@ static ERL_NIF_TERM erl_ok;
 
 // ----------------------------------------------------------------------------
 
-static ERL_NIF_TERM as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
-    if (!is_aerospike_initialised) {
-        as_config config;
-        as_config_init(&config);
-        aerospike_init(&as, &config);
-        is_aerospike_initialised = true;
-    }
+    as_config_init(&config);
+    aerospike_init(&as, &config);
     erl_error = enif_make_atom(env, "error");
     erl_ok = enif_make_atom(env, "ok");
+    is_aerospike_initialised = true;
+    return 0;
+}
+
+static ERL_NIF_TERM as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
     ERL_NIF_TERM msg = enif_make_string(env, "initialised", ERL_NIF_UTF8);
     return enif_make_tuple2(env, erl_ok, msg);
 }
@@ -2103,4 +2106,4 @@ static ErlNifFunc nif_funcs[] = {
     {"bar", 1, bar_nif}
 };
 
-ERL_NIF_INIT(aspike_nif, nif_funcs, NULL, NULL, NULL, NULL)
+ERL_NIF_INIT(aspike_nif, nif_funcs, load, NULL, NULL, NULL)
