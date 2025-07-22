@@ -64,6 +64,8 @@
     cdt_delete_by_keys_batch/4,
     cdt_put/5,
     cdt_put/6,
+    list_append/5,
+    list_append/6,
     segment_tag_get/4,
     segment_tag_get/3
 ]).
@@ -99,6 +101,7 @@
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
     cdt_put/6,
+    list_append/6,
     segment_tag_get/4
 ]).
 
@@ -223,6 +226,17 @@ binary_put(_Namespace, _Set, _Key, _BinList, _TTL) ->
 % {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}  timeouts in milliseconds
 cdt_put(Namespace, Set, Key, BinList, TTL) ->
     cdt_put(Namespace, Set, Key, BinList, TTL, {0, 0, 30000, 1000}).
+
+list_append(Namespace, Set, Key, Items, TTL) ->
+    list_append(Namespace, Set, Key, Items, TTL, {0, 0, 30000, 1000}).
+
+-spec list_append(binary(), binary(), binary(), [{binary(), integer()}], integer(), 
+                 {integer(), integer(), integer(), integer()}) -> 
+                    {ok, string()} | {error, string()}.
+list_append(Namespace, Set, Key, Items, TTL, Policy) when 
+    is_binary(Namespace), is_binary(Set), is_binary(Key), is_list(Items), 
+    is_integer(TTL), is_tuple(Policy), tuple_size(Policy) =:= 4 ->
+    list_append(Namespace, Set, Key, Items, TTL, Policy).
 -spec cdt_put(binary(), binary(), binary(), 
         [{binary(), binary()|integer()|[integer()]}], integer(), 
         {integer(), integer(), integer(), integer()}) -> 
@@ -416,5 +430,3 @@ bar(_Y) ->
 % 3> tsl:tst(aspike_nif, key_put, 0, 100000).
 % aspike_nif:key_put, N=0, R=100000, Time=588.68821
 % -----------------------------------------------------------------
-
-

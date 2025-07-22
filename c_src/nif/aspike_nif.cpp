@@ -1257,6 +1257,129 @@ static ERL_NIF_TERM cdt_expire(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     return enif_make_tuple2(env, rc, msg);
 }
 
+static ERL_NIF_TERM nif_list_append(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    ErlNifBinary bin_ns, bin_set, bin_key;
+    std::string name_space, aspk_set, aspk_key;
+    long ttl;
+
+    if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
+	    return enif_make_badarg(env);
+    }
+    name_space.assign((const char*) bin_ns.data, bin_ns.size);
+
+    if (!enif_inspect_binary(env, argv[1], &bin_set)) {
+	    return enif_make_badarg(env);
+    }
+    aspk_set.assign((const char*) bin_set.data, bin_set.size);
+
+    if (!enif_inspect_binary(env, argv[2], &bin_key)) {
+	    return enif_make_badarg(env);
+    }
+    aspk_key.assign((const char*) bin_key.data, bin_key.size);
+
+    ERL_NIF_TERM list = argv[3];
+    unsigned int length;
+    if (!enif_is_list(env, list) || !enif_get_list_length(env, list, &length)) {
+	    return enif_make_badarg(env);
+    }
+
+    if (!enif_get_long(env, argv[4], &ttl)) {
+        return enif_make_badarg(env);
+    }
+
+    // {max_retries, sleep_between_retries, socket_timeout, total_timeout}
+    const ERL_NIF_TERM* policy = NULL;
+    int policy_length;
+    long max_retries = 0;
+    long sleep_between_retries = 0;
+    long socket_timeout = 30000;
+    long total_timeout = 1000;
+    if(!enif_get_tuple(env, argv[5], &policy_length, &policy) || policy_length != 4){
+        return enif_make_badarg(env);
+    }
+    enif_get_long(env, policy[0], &max_retries);
+    enif_get_long(env, policy[1], &sleep_between_retries);
+    enif_get_long(env, policy[2], &socket_timeout);
+    enif_get_long(env, policy[3], &total_timeout);
+    
+    ERL_NIF_TERM rc, msg;
+    if (length == 0) {
+        rc = erl_ok;
+        msg = enif_make_string(env, "list_append", ERL_NIF_UTF8);
+        return enif_make_tuple2(env, rc, msg);
+    }
+
+    CHECK_ALL
+
+    as_error err;
+    as_key key;
+    as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
+
+    as_operations ops;
+    as_operations_inita(&ops, length);
+    if(ttl != 0){
+        ops.ttl = ttl;
+    }
+
+    as_arraylist* items = as_arraylist_new(length, 0);
+    for (uint i = 0; i < length; i++) {
+        ERL_NIF_TERM head;
+        ERL_NIF_TERM tail;
+        ErlNifBinary bin_id;
+        long item_ttl;
+        int t_length;
+        const ERL_NIF_TERM* tuple = NULL;
+
+        if (!enif_get_list_cell(env, list, &head, &tail)) {
+            break;
+        }
+        if(!enif_get_tuple(env, head, &t_length, &tuple) || t_length != 2){
+            return enif_make_badarg(env);
+        }
+
+        if (!enif_inspect_binary(env, tuple[0], &bin_id)) {
+            return enif_make_badarg(env);
+        }
+        if (!enif_get_long(env, tuple[1], &item_ttl)) {
+            return enif_make_badarg(env);
+        }
+
+        as_orderedmap* item = as_orderedmap_new(2);
+        as_string* key_str = as_string_new((char*)bin_id.data, false);
+        as_integer* val = as_integer_new(item_ttl);
+        
+        as_orderedmap_set(item, (as_val*)key_str, (as_val*)val);
+
+        as_arraylist_append(items, (as_val*)item);
+        list = tail;
+    }
+
+    as_operations_add_list_append_items(&ops, "items", (as_list*)items);
+
+    as_policy_operate p;
+    as_policy_operate_init(&p);
+    p.ttl = ttl;
+    p.base.max_retries = max_retries;
+    p.base.sleep_between_retries = sleep_between_retries;
+    p.base.socket_timeout = socket_timeout;
+    p.base.total_timeout = total_timeout;
+
+    if(aerospike_key_operate(&as, &err, &p, &key, &ops, NULL) != AEROSPIKE_OK){
+        rc = erl_error;
+        msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
+    } else {
+        rc = erl_ok;
+        msg = enif_make_string(env, "list_append", ERL_NIF_UTF8);
+    }
+
+    as_operations_destroy(&ops);
+    as_key_destroy(&key);
+    as_arraylist_destroy(items);
+
+    return enif_make_tuple2(env, rc, msg);
+}
+
 static ERL_NIF_TERM cdt_delete_by_keys_batch(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     ErlNifBinary bin_ns, bin_set,  bin_name;
@@ -2057,6 +2180,7 @@ static ErlNifFunc nif_funcs[] = {
     NIF_FUN("key_put", 4, key_put),
     NIF_FUN("binary_put", 5, binary_put),
     NIF_FUN("cdt_put", 6, cdt_put),
+    NIF_FUN("list_append", 6, nif_list_append),
     NIF_FUN("binary_remove", 5, binary_remove),
     NIF_FUN("binary_get", 3, binary_get),
     NIF_FUN("cdt_get", 4, cdt_get),
