@@ -236,7 +236,7 @@ list_append(Namespace, Set, Key, Items, TTL) ->
 list_append(Namespace, Set, Key, Items, TTL, Policy) when 
     is_binary(Namespace), is_binary(Set), is_binary(Key), is_list(Items), 
     is_integer(TTL), is_tuple(Policy), tuple_size(Policy) =:= 4 ->
-    nif_list_append(Namespace, Set, Key, Items, TTL, Policy).
+    list_append(Namespace, Set, Key, Items, TTL, Policy).
 -spec cdt_put(binary(), binary(), binary(), 
         [{binary(), binary()|integer()|[integer()]}], integer(), 
         {integer(), integer(), integer(), integer()}) -> 

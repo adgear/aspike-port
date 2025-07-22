@@ -1346,13 +1346,10 @@ static ERL_NIF_TERM nif_list_append(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         }
 
         as_orderedmap* item = as_orderedmap_new(2);
-        as_string id_str;
-        as_string_init(&id_str, (char*)bin_id.data, false);
-        as_orderedmap_set(item, (as_val*)&as_string, (as_val*)&id_str);
-
-        as_integer ttl_val;
-        as_integer_init(&ttl_val, item_ttl);
-        as_orderedmap_set(item, (as_val*)&as_integer, (as_val*)&ttl_val);
+        as_string* key_str = as_string_new((char*)bin_id.data, false);
+        as_integer* val = as_integer_new(item_ttl);
+        
+        as_orderedmap_set(item, (as_val*)key_str, (as_val*)val);
 
         as_arraylist_append(items, (as_val*)item);
         list = tail;
@@ -1378,7 +1375,7 @@ static ERL_NIF_TERM nif_list_append(ErlNifEnv* env, int argc, const ERL_NIF_TERM
 
     as_operations_destroy(&ops);
     as_key_destroy(&key);
-    as_list_destroy(items);
+    as_arraylist_destroy(items);
 
     return enif_make_tuple2(env, rc, msg);
 }
