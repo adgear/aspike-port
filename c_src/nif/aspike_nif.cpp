@@ -1322,7 +1322,7 @@ static ERL_NIF_TERM nif_list_append(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         ops.ttl = ttl;
     }
 
-    as_list* items = as_list_new(length);
+    as_arraylist* items = as_arraylist_new(length, 0);
     for (uint i = 0; i < length; i++) {
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
@@ -1345,20 +1345,20 @@ static ERL_NIF_TERM nif_list_append(ErlNifEnv* env, int argc, const ERL_NIF_TERM
             return enif_make_badarg(env);
         }
 
-        as_map* item = as_map_new(2);
+        as_orderedmap* item = as_orderedmap_new(2);
         as_string id_str;
         as_string_init(&id_str, (char*)bin_id.data, false);
-        as_map_set(item, (as_val*)&as_cmp_string, (as_val*)&id_str);
+        as_orderedmap_set(item, (as_val*)&as_string, (as_val*)&id_str);
 
         as_integer ttl_val;
         as_integer_init(&ttl_val, item_ttl);
-        as_map_set(item, (as_val*)&as_cmp_integer, (as_val*)&ttl_val);
+        as_orderedmap_set(item, (as_val*)&as_integer, (as_val*)&ttl_val);
 
-        as_list_append(items, (as_val*)item);
+        as_arraylist_append(items, (as_val*)item);
         list = tail;
     }
 
-    as_operations_add_list_append_items(&ops, "items", NULL, items);
+    as_operations_add_list_append_items(&ops, "items", (as_list*)items);
 
     as_policy_operate p;
     as_policy_operate_init(&p);
