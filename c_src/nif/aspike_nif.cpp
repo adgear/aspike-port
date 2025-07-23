@@ -1647,18 +1647,31 @@ static ERL_NIF_TERM segment_tag_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         "NULL val - internal error")
 
     RETURN_ERROR_WITH_MSG_IF(
-        (as_val_type(val) != AS_STRING), 
+        (as_val_type(val) != AS_STRING && as_val_type(val) != AS_MAP), 
         p_rec, 
         int(AEROSPIKE_ERR), 
-        "Non-string type bin - internal error")
+        "Non-string or non-map bin - internal error")
 
-    uint8_t * bin_as_str = (uint8_t *) val->string.value;
-    auto len = val->string.len;
-
-    unsigned char * val_data;
     ERL_NIF_TERM res;
-    val_data = enif_make_new_binary(env, len, &res);
-    memcpy(val_data, bin_as_str, len);
+
+    if (as_val_type(val) == AS_STRING) {
+        uint8_t * bin_as_str = (uint8_t *) val->string.value;
+        auto len = val->string.len;
+
+        unsigned char * val_data;
+        val_data = enif_make_new_binary(env, len, &res);
+        memcpy(val_data, bin_as_str, len);
+    }
+    else if (as_val_type(val) == AS_MAP) {
+        char * map_str = as_val_tostring((as_val*)val);
+        auto len = map_str ? strlen(map_str) : 0;
+        unsigned char * val_data;
+        val_data = enif_make_new_binary(env, len, &res);
+        if (map_str) {
+            memcpy(val_data, map_str, len);
+            free(map_str);
+        }
+    }
 
     rc = erl_ok;
     code = enif_make_int(env, int(AEROSPIKE_OK));
