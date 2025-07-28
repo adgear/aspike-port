@@ -1663,14 +1663,26 @@ static ERL_NIF_TERM segment_tag_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM
         memcpy(val_data, bin_as_str, len);
     }
     else if (as_val_type(val) == AS_MAP) {
-        char * map_str = as_val_tostring((as_val*)val);
-        auto len = map_str ? strlen(map_str) : 0;
-        unsigned char * val_data;
-        val_data = enif_make_new_binary(env, len, &res);
-        if (map_str) {
-            memcpy(val_data, map_str, len);
-            free(map_str);
+        as_map * amap = (as_map*)val;
+        uint32_t size = as_map_size(amap);
+        ERL_NIF_TERM keys[size];
+        ERL_NIF_TERM vals[size];
+
+        as_orderedmap_iterator it;
+        as_orderedmap_iterator_init(&it, (as_orderedmap*)amap);
+
+        uint32_t idx = 0;
+        while (as_orderedmap_iterator_has_next(&it)) {
+            as_pair * pair = as_pair_fromval(as_orderedmap_iterator_next(&it));
+            keys[idx] = get_binary_asval(env, as_pair_1(pair));
+            vals[idx] = get_binary_asval(env, as_pair_2(pair));
+            idx++;
         }
+        as_orderedmap_iterator_destroy(&it);
+
+        ERL_NIF_TERM map_term;
+        enif_make_map_from_arrays(env, keys, vals, size, &map_term);
+        res = map_term;
     }
 
     rc = erl_ok;
