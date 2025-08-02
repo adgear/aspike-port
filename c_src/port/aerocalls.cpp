@@ -1,4 +1,4 @@
-/* aerocalls.c */
+/* aerocalls.cpp */
 
 #include "ei.h"
 #include <string.h>
@@ -40,13 +40,12 @@
 #define AS_BIN_NAME_MAX_SIZE 16
 #define MAX_BINS_NUMBER 1024
 
-const char DEFAULT_HOST[] = "127.0.0.1";
+// const char DEFAULT_HOST[] = "127.0.0.1";
 // const int DEFAULT_PORT = 3000;
-const int DEFAULT_PORT = 3010;
-const char DEFAULT_NAMESPACE[] = "test";
-const char DEFAULT_SET[] = "eg-set";
-const char DEFAULT_KEY_STR[] = "eg-key";
-const uint32_t DEFAULT_NUM_KEYS = 20;
+// const char DEFAULT_NAMESPACE[] = "test";
+// const char DEFAULT_SET[] = "eg-set";
+// const char DEFAULT_KEY_STR[] = "eg-key";
+// const uint32_t DEFAULT_NUM_KEYS = 20;
 
 typedef struct {
     ei_x_buff* env;

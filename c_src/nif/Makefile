@@ -2,6 +2,7 @@
 
 CURDIR := $(shell pwd)
 BASEDIR := $(abspath $(CURDIR)/..)
+AERO_BASE := $(abspath $(CURDIR)/../../aerospike-client-c)
 
 PROJECT := aspike_nif
 
@@ -39,9 +40,9 @@ CXXFLAGS += -std=c++11
 CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
 CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
 
-LDLIBS += $(AERO_BASE)/lib/libaerospike.a
+LDLIBS += $(shell find $(AERO_BASE) -name libaerospike.a)
 LDLIBS += -L$(ERL_INTERFACE_LIB_DIR) -lei 
-LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lev -lssl -lcrypto  -lpthread -lm -lz  -lm -lz  -lstdc++
+LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lev -lssl -lcrypto -lpthread -lm -lz -lstdc++
 LDFLAGS += -shared
 
 # Verbosity.
