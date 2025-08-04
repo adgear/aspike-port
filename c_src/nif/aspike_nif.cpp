@@ -105,6 +105,16 @@ static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     return 0;
 }
 
+// not sure why I have to explicitly declare it
+extern "C" {
+AS_EXTERN size_t cf_allocated();
+}
+
+static ERL_NIF_TERM allocated(ErlNifEnv* env, int, const ERL_NIF_TERM [])
+{
+    return enif_make_uint64(env, cf_allocated());
+}
+
 static ERL_NIF_TERM as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     ERL_NIF_TERM msg = enif_make_string(env, "initialised", ERL_NIF_UTF8);
@@ -2074,6 +2084,7 @@ static ERL_NIF_TERM bar_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 
 static ErlNifFunc nif_funcs[] = {
     {"as_init", 0, as_init},
+    NIF_FUN("allocated", 0, allocated),
     NIF_FUN("connect", 2, connect),
     NIF_FUN("nif_host_add", 2, host_add),
     NIF_FUN("host_clear", 0, host_clear),

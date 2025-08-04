@@ -5,6 +5,7 @@
 -include("../include/defines.hrl").
 
 -export([
+    allocated/0,
     as_init/0,
     host_add/0,
     host_add/1,
@@ -68,6 +69,7 @@
 ]).
 
 -nifs([
+    allocated/0,
     as_init/0,
     nif_host_add/2,
     host_clear/0,
@@ -114,6 +116,9 @@ init() ->
 
 not_loaded(Line) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).
+
+allocated() ->
+    not_loaded(?LINE).
 
 as_init() ->
     not_loaded(?LINE).
