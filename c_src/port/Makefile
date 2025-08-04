@@ -40,8 +40,8 @@ CXXFLAGS += -std=c++11
 # use aerospike clienc explicit build artifacts
 AERO_BASE := $(AERO_BASE)/target/$(shell uname)-$(shell uname -m)
 
-CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/src/include
-CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/src/include
+CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
+CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
 
 LDLIBS += $(AERO_BASE)/lib/libaerospike.a
 LDLIBS += -L$(ERL_INTERFACE_LIB_DIR) -lei 
