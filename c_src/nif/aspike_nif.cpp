@@ -31,7 +31,6 @@
 #include <aerospike/as_batch.h>
 #include <aerospike/aerospike_batch.h>
 #include <aerospike/as_arraylist.h>
-#include <citrusleaf/alloc.h>
 
 // ----------------------------------------------------------------------------
 
