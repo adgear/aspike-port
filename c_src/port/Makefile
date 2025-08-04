@@ -37,10 +37,13 @@ else ifeq ($(UNAME_SYS), Linux)
 endif
 CXXFLAGS += -std=c++11
 
+# use aerospike clienc explicit build artifacts
+AERO_BASE := $(AERO_BASE)/target/$(shell uname)-$(shell uname -m)
+
 CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/src/include
 CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/src/include
 
-LDLIBS += $(shell find $(AERO_BASE) -name libaerospike.a)
+LDLIBS += $(AERO_BASE)/lib/libaerospike.a
 LDLIBS += -L$(ERL_INTERFACE_LIB_DIR) -lei 
 LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lyaml -lev -lssl -lcrypto -lpthread -lm -lz -ldl -lstdc++
 
