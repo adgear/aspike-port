@@ -179,9 +179,6 @@ int call_host_info(const char *buf, int *index, int arity, int fd_out);
 
 int call_help(const char *buf, int *index, int arity, int fd_out);
 
-int call_foo(const char *buf, int *index, int arity, int fd_out);
-int call_bar(const char *buf, int *index, int arity, int fd_out);
-
 int call_port_cdt_get(const char *buf, int *index, int arity, int fd_out);
 int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out);
 int call_port_cdt_expire(const char *buf, int *index, int arity, int fd_out);
@@ -337,13 +334,6 @@ int function_call(const char *buf, int *index, int arity, int fd_out) {
     }
     if (check_name(fname, "binary_remove", arity, 6)) {
         return call_port_binary_remove(buf, index, arity, fd_out);
-    }
-
-    if (check_name(fname, "foo", arity, 2)) {
-        return call_foo(buf, index, arity, fd_out);
-    }
-    if (check_name(fname, "bar", arity, 2)) {
-        return call_bar(buf, index, arity, fd_out);
     }
 
     fail(fname, fd_out);
