@@ -64,8 +64,7 @@
     cdt_delete_by_keys_batch/4,
     cdt_put/5,
     cdt_put/6,
-    segment_tag_get/4,
-    segment_tag_get/3
+    segment_tag_get/4
 ]).
 
 -nifs([
@@ -279,8 +278,6 @@ key_get(Namespace, Set, Key) when is_list(Namespace), is_list(Set), is_list(Key)
 binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_binary(Key) ->
     not_loaded(?LINE).
 
-segment_tag_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_binary(Key) ->
-    segment_tag_get(Namespace, Set, Key, <<"mu_sgm_id_ls">>).
 segment_tag_get(Namespace, Set, Key, Tag) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(Tag) ->
     not_loaded(?LINE).
 
