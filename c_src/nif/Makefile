@@ -2,6 +2,7 @@
 
 CURDIR := $(shell pwd)
 BASEDIR := $(abspath $(CURDIR)/..)
+AERO_BASE := $(abspath $(CURDIR)/../../aerospike-client-c)
 
 PROJECT := aspike_nif
 
@@ -36,12 +37,15 @@ else ifeq ($(UNAME_SYS), Linux)
 endif
 CXXFLAGS += -std=c++11
 
-CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include/aerospike
-CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR)
+# use aerospike clienc explicit build artifacts
+AERO_BASE := $(AERO_BASE)/target/$(shell uname)-$(shell uname -m)
+
+CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
+CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
 
 LDLIBS += $(AERO_BASE)/lib/libaerospike.a
 LDLIBS += -L$(ERL_INTERFACE_LIB_DIR) -lei 
-LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lev -lssl -lcrypto  -lpthread -lm -lz  -lm -lz  -lstdc++
+LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lyaml -lev -lssl -lcrypto -lpthread -lm -lz -lstdc++
 LDFLAGS += -shared
 
 # Verbosity.

@@ -32,7 +32,6 @@
 #include <aerospike/aerospike_batch.h>
 #include <aerospike/as_arraylist.h>
 
-
 // ----------------------------------------------------------------------------
 
 #define MAX_HOST_SIZE 1024
@@ -51,6 +50,7 @@
 
 // ----------------------------------------------------------------------------
 
+static as_config config;
 static aerospike as;
 static bool is_aerospike_initialised = false;
 static bool is_connected = false;
@@ -94,16 +94,18 @@ static ERL_NIF_TERM erl_ok;
 
 // ----------------------------------------------------------------------------
 
-static ERL_NIF_TERM as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
-    if (!is_aerospike_initialised) {
-        as_config config;
-        as_config_init(&config);
-        aerospike_init(&as, &config);
-        is_aerospike_initialised = true;
-    }
+    as_config_init(&config);
+    aerospike_init(&as, &config);
     erl_error = enif_make_atom(env, "error");
     erl_ok = enif_make_atom(env, "ok");
+    is_aerospike_initialised = true;
+    return 0;
+}
+
+static ERL_NIF_TERM as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
     ERL_NIF_TERM msg = enif_make_string(env, "initialised", ERL_NIF_UTF8);
     return enif_make_tuple2(env, erl_ok, msg);
 }
@@ -999,7 +1001,7 @@ static ERL_NIF_TERM format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
         default:
             char * val_as_str = as_val_tostring(val);
             ERL_NIF_TERM res =  enif_make_string(env, as_val_tostring(val), ERL_NIF_UTF8);
-            free(val_as_str);
+            cf_free(val_as_str);
             return res;
     }
 }
@@ -1012,7 +1014,7 @@ static ERL_NIF_TERM dump_records(ErlNifEnv* env, const as_record *p_rec) {
 	if (p_rec->key.valuep) {
 		char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
         res = enif_make_string(env, key_val_as_str, ERL_NIF_UTF8);
-		free(key_val_as_str);
+		cf_free(key_val_as_str);
         return res;
 	}
 
@@ -1095,7 +1097,7 @@ static ERL_NIF_TERM dump_binary_records(ErlNifEnv* env, const as_record *p_rec) 
         key_data = enif_make_new_binary(env, len, &res);
         memcpy(key_data, key_val_as_str, len);
         //res = enif_make_string(env, key_val_as_str, ERL_NIF_UTF8);
-		free(key_val_as_str);
+		cf_free(key_val_as_str);
         return res;
 	}
 
@@ -1138,7 +1140,7 @@ static ERL_NIF_TERM dump_cdt_records(ErlNifEnv* env, const as_record *p_rec) {
         key_data = enif_make_new_binary(env, len, &res);
         memcpy(key_data, key_val_as_str, len);
         //res = enif_make_string(env, key_val_as_str, ERL_NIF_UTF8);
-		free(key_val_as_str);
+		cf_free(key_val_as_str);
         return res;
 	}
 
@@ -1738,7 +1740,7 @@ static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
         if(!enif_get_string(env, head, bin, MAX_KEY_STR_SIZE, ERL_NIF_UTF8)){
             break;
         }
-        bins[i] = strdup(bin);
+        bins[i] = (const char *)cf_strdup(bin);
         list = tail;
     }
     bins[i] = NULL;
@@ -1756,7 +1758,7 @@ static ERL_NIF_TERM key_select(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv
     msg = dump_records(env, p_rec);
     rc = erl_ok;
     for (uint j = 0; j < i; j++) {
-        delete(bins[j]);
+        cf_free((void *)bins[j]);
     }
     if (p_rec != NULL) {
         as_record_destroy(p_rec);
@@ -1949,7 +1951,7 @@ static ERL_NIF_TERM nif_node_info(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
     } else {
         rc = erl_ok;
         msg = enif_make_string(env, &info[0], ERL_NIF_UTF8);
-        free(info);
+        cf_free(info);
     }
     as_node_release(node);
 
@@ -1977,7 +1979,7 @@ static ERL_NIF_TERM nif_help(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]
     } else {
         rc = erl_ok;
         msg = enif_make_string(env, info, ERL_NIF_UTF8);
-        free(info);
+        cf_free(info);
     }
 
     return enif_make_tuple2(env, rc, msg);   
@@ -2038,7 +2040,7 @@ static ERL_NIF_TERM nif_host_info(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
     } else {
         rc = erl_ok;
         msg = enif_make_string(env, &info[0], ERL_NIF_UTF8);
-        free(info);
+        cf_free(info);
     }
 
     return enif_make_tuple2(env, rc, msg);   
@@ -2104,4 +2106,4 @@ static ErlNifFunc nif_funcs[] = {
     {"bar", 1, bar_nif}
 };
 
-ERL_NIF_INIT(aspike_nif, nif_funcs, NULL, NULL, NULL, NULL)
+ERL_NIF_INIT(aspike_nif, nif_funcs, load, NULL, NULL, NULL)
