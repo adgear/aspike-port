@@ -2,7 +2,6 @@
 
 #include <stdio.h>
 #include <unistd.h>
-#include <string>
 
 #define bytes_to_u16(MSB,LSB) (((unsigned int) ((unsigned char) MSB)) & 255)<<8 | (((unsigned char) LSB)&255)
 
@@ -12,7 +11,6 @@ int read_exact(byte *buf, unsigned int len, int fd);
 int write_exact(byte *buf, int len, int fd);
 int read_cmd(byte *buf, int fd);
 int write_cmd(byte *buf, int len, int fd);
-void logfile(std::string str);
 
 int read_exact(byte *buf, unsigned int len, int fd)
 {
