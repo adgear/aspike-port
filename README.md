@@ -45,7 +45,7 @@ To start the Aerospike client, run the erlang shell:
 ```bash
 erl -pa _build/default/lib/*/ebin
 ```
-and then run next code:
+and then run next code to initialize NIF connection:
 ```erlang
 application:set_env(aspike_port, host, "172.17.0.2").
 application:set_env(aspike_port, psw, "").
@@ -54,6 +54,13 @@ application:set_env(aspike_port, user, "").
 aspike_nif:as_init().
 aspike_nif:host_add().
 aspike_nif:connect().
+```
+
+Next you can run very basic commands just to make sure the connection working and aerospike is able to
+accept and store the data:
+```erlang
+aspike_nif:cdt_put(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>, [{<<"fcap_map">>, [<<"campaign1">>, <<"campaign1_value">>, 123, <<"campaign2">>, <<"campaign2_value">>, 456]}], 300).
+aspike_nif:cdt_get(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>).
 ```
 
 ### Single process tests
