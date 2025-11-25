@@ -147,19 +147,19 @@ sp_insert(Namespace, Set, N, TTL, Sleep) ->
 	sp_insert(Namespace, Set, N, TTL, Sleep, 1_000_000_000_000, 0, 0).
 
 sp_insert(_, _, 0, _, _, _, Oks, Errs) -> {Oks, Errs};
-sp_insert(Namespace, Set, N, TTL, Sleep, AddP, Oks, Errs) ->
-   case N rem 10000 of
-     0 -> io:format("write N: ~p ~n", [N]);
+sp_insert(Namespace, SetName, TimesToInsert, TTL, Sleep, AddP, Oks, Errs) ->
+   case TimesToInsert rem 10000 of
+     0 -> io:format("write N: ~p ~n", [TimesToInsert]);
      _ -> ok
    end,
-   Key = integer_to_binary(N + AddP),
+   Key = integer_to_binary(TimesToInsert + AddP),
    Bins = [
       {<<"column1">>, <<"fcap">>},
       {<<"column2">>, <<"campaign.164206.3684975">>},
       {<<"timestamps">>, <<0,0,0,0,0,0,0,2,0,0,0,0,101,231,111,33,0,0,0,0,101,231,64,10>>}
    ],
    T1 = erlang:system_time(microsecond),
-   {O1, E1} = case aspike_nif:binary_put(Namespace, Set, Key, Bins, TTL) of
+   {O1, E1} = case aspike_nif:binary_put(Namespace, SetName, Key, Bins, TTL) of
      {ok, _} -> {Oks+1, Errs};
      EE ->
 	io:format("Error ~p ~n", [EE]), 
@@ -175,7 +175,7 @@ sp_insert(Namespace, Set, N, TTL, Sleep, AddP, Oks, Errs) ->
      0 -> ok;
      _ -> timer:sleep(rand:uniform(Sleep))
    end,
-   sp_insert(Namespace, Set, N-1, TTL, Sleep, AddP, O1, E1).
+   sp_insert(Namespace, SetName, TimesToInsert - 1, TTL, Sleep, AddP, O1, E1).
 
 
 pool_insert(_, _, 0, _, _, _, Oks, Errs) -> {Oks, Errs};

@@ -123,7 +123,7 @@ start() ->
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, utils:find_lib(?LIBNAME), []).
 
-% @doc This function is used to execute all other call.
+% @doc This function is used to execute all other calls.
 -spec command(term()) -> term().
 command(Cmd) ->
     gen_server:call(?MODULE, {command, Cmd}, ?DEFAULT_TIMEOUT + 10).
