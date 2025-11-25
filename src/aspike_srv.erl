@@ -87,10 +87,7 @@
     port_status/0,
     port_info/0,
     help/0,
-    help/1,
-    % ------
-    bar/1,
-    foo/1
+    help/1
 ]).
 
 -record(state, {
@@ -354,15 +351,6 @@ port_info() ->
 -spec port_status() -> {ok, map()} | {error, term()}.
 port_status() ->
     command({port_status}).
-
--spec foo(integer()) -> {ok, integer()} | {error, term()}.
-foo(X) when is_integer(X) ->
-    command({foo, X}).
-
--spec bar(integer()) -> {ok, integer()} | {error, term()}.
-% bar(X) when is_integer(X) ->
-bar(X) ->
-    command({bar, X}).
 
 % -------------------------------------------------------------------------------
 % Callbacks

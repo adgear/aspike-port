@@ -1,7 +1,3 @@
-# cc -o complex_nif.so -DNIF -g -std=gnu11 -I /usr/local/Cellar/erlang/25.2/lib/erlang/erts-13.1.3/include/ -I /usr/local/Cellar/erlang/25.2/lib/erlang/lib/erl_interface-5.3/include\
-#   complex.c	complex6_nif.c\
-#   -lm -fPIC -L /usr/local/Cellar/erlang/25.2/lib/erlang/lib/erl_interface-5.3/lib -lei -lerl_interface
-
 # ERTS_INCLUDE_DIR=$(erl -noshell -eval "io:format(\"~ts/erts-~ts/include/\", [code:root_dir(), erlang:system_info(version)])." -s init stop)
 # echo $ERTS_INCLUDE_DIR
 ERTS_INCLUDE_DIR=/usr/local/Cellar/erlang/26.0.2/lib/erlang/erts-14.0.2/include/
@@ -12,7 +8,7 @@ ERL_INTERFACE_INCLUDE_DIR=/usr/local/Cellar/erlang/26.0.2/lib/erlang/lib/erl_int
 # echo $ERL_INTERFACE_LIB_DIR
 ERL_INTERFACE_LIB_DIR=/usr/local/Cellar/erlang/26.0.2/lib/erlang/lib/erl_interface-5.4/lib
 
-CFILES="complex.c	aspike_nif.c"
+CFILES="aspike_nif.c"
 
 OUTPUT="-o ../priv/aspike_nif.so"
 
@@ -23,10 +19,9 @@ INCLUDES="-I $ERTS_INCLUDE_DIR -I $ERL_INTERFACE_INCLUDE_DIR $CFILES"
 # CC_FLAGS="-DNIF -O0 -g -std=gnu11 -bundle -flat_namespace -undefined suppress" 
 CC_FLAGS="-DNIF -O0 -g  -bundle  -undefined suppress" 
 
-S="gcc  $CC_FLAGS  $INCLUDES  $OUTPUT -lm -fPIC -L $ERL_INTERFACE_LIB_DIR -lei"
-echo $S
-eval $S  
-
+cmd="gcc  $CC_FLAGS  $INCLUDES  $OUTPUT -lm -fPIC -L $ERL_INTERFACE_LIB_DIR -lei"
+echo $cmd
+$cmd
 
 # S="gcc  -DNIF -O0 -g -std=gnu11   -bundle -flat_namespace -undefined suppress  $INCLUDES  $OUTPUT -lm -fPIC -L $ERL_INTERFACE_LIB_DIR -lei"
 

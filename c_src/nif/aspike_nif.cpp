@@ -2049,29 +2049,6 @@ static ERL_NIF_TERM nif_host_info(ErlNifEnv* env, int argc, const ERL_NIF_TERM a
 
 // ------------------------------------------------------------------------------------------------
 
-extern int foo(int x);
-extern int bar(int y);
-
-static ERL_NIF_TERM foo_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
-{
-    int x, ret;
-    if (!enif_get_int(env, argv[0], &x)) {
-	    return enif_make_badarg(env);
-    }
-    ret = foo(x);
-    return enif_make_int(env, ret);
-}
-
-static ERL_NIF_TERM bar_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
-{
-    int y, ret;
-    if (!enif_get_int(env, argv[0], &y)) {
-	    return enif_make_badarg(env);
-    }
-    ret = bar(y);
-    return enif_make_int(env, ret);
-}
-
 static ErlNifFunc nif_funcs[] = {
     {"as_init", 0, as_init},
     NIF_FUN("connect", 2, connect),
@@ -2101,9 +2078,7 @@ static ErlNifFunc nif_funcs[] = {
     NIF_FUN("nif_host_info", 3, nif_host_info),
     // ----------------------------------------------------
     NIF_FUN("a_key_put", 6, a_key_put),
-    NIF_FUN("segment_tag_get", 4, segment_tag_get),
-    {"foo", 1, foo_nif},
-    {"bar", 1, bar_nif}
+    NIF_FUN("segment_tag_get", 4, segment_tag_get)
 };
 
 ERL_NIF_INIT(aspike_nif, nif_funcs, load, NULL, NULL, NULL)

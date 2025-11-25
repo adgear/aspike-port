@@ -98,11 +98,7 @@
     cdt_delete_by_keys_batch/4,
     cdt_put/5,
     cdt_put/6,
-    binary_remove/5,
-
-    % ------
-    bar/1,
-    foo/1
+    binary_remove/5
 ]).
 
 -record(state, {
@@ -377,15 +373,6 @@ port_info() ->
 -spec port_status() -> {ok, map()} | {error, term()}.
 port_status() ->
     command({port_status}).
-
--spec foo(integer()) -> {ok, integer()} | {error, term()}.
-foo(X) when is_integer(X) ->
-    command({foo, X}).
-
--spec bar(integer()) -> {ok, integer()} | {error, term()}.
-% bar(X) when is_integer(X) ->
-bar(X) ->
-    command({bar, X}).
 
 %--------------------------------
 

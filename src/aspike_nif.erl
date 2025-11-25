@@ -52,8 +52,6 @@
     a_key_put/0,
     a_key_put/1,
     a_key_put/6,
-    foo/1,
-    bar/1,
     binary_put/5,
     binary_remove/5,
     binary_get/3,
@@ -88,8 +86,6 @@
     nif_host_info/3,
     % --------------------------------------
     a_key_put/6,
-    foo/1,
-    bar/1,
     binary_put/5,
     binary_remove/5,
     binary_get/3,
@@ -400,12 +396,6 @@ a_key_put(Rep) ->
 
 a_key_put(_, _, _, _, _, _) ->
     not_loaded(?LINE).
-
-foo(_X) ->
-    exit(nif_library_not_loaded).
-
-bar(_Y) ->
-    exit(nif_library_not_loaded).
 
 % -----------------------------------------------------------------
 % 2> tsl:tst(aspike_nif, key_put, 0, 10000).
