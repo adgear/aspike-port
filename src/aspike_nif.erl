@@ -62,6 +62,8 @@
     cdt_delete_by_keys_batch/4,
     cdt_put/5,
     cdt_put/6,
+    cdt_put_sync/6,
+    cdt_put_async/6,
     segment_tag_get/4
 ]).
 
@@ -93,7 +95,8 @@
     cdt_expire/4,
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
-    cdt_put/6,
+    cdt_put_sync/6,
+    cdt_put_async/6,
     segment_tag_get/4
 ]).
 
@@ -222,8 +225,47 @@ cdt_put(Namespace, Set, Key, BinList, TTL) ->
         [{binary(), binary()|integer()|[integer()]}], integer(), 
         {integer(), integer(), integer(), integer()}) -> 
             {ok, string()} | {error, string()}.
-cdt_put(_Namespace, _Set, _Key, _BinList, _TTL, _Policy) ->
+cdt_put(Namespace, Set, Key, BinList, TTL, Policy) ->
+    SyncCmd = fun() -> cdt_put_sync(Namespace, Set, Key, BinList, TTL, Policy) end,
+    AsyncCmd = fun() -> cdt_put_async(Namespace, Set, Key, BinList, TTL, Policy) end,
+    call_aerospike_nif(SyncCmd, AsyncCmd).
+
+cdt_put_sync(_Namespace, _Set, _Key, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
+cdt_put_async(_Namespace, _Set, _Key, _BinList, _TTL, _Policy) ->
+    not_loaded(?LINE).
+
+call_aerospike_nif(SyncCmd, AsyncCmd) ->
+    DoAsync = true,
+    case DoAsync of
+        true ->
+            % TODO: determine a value for TTL
+            TimeToWait = 1000, % in ms
+            Res = AsyncCmd(),
+            io:format("Result from async launch: ~p~n", [Res]),
+            case Res of
+                {ok, in_progress} ->
+                    % Request is accepted for processing
+                    receive
+                        aspike_ok -> ok;
+                        {aspike_ok, Response} -> Response;
+                        {error, {ErrorCode, ErrorMessage}} ->
+                            io:format("Got error from AS: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+                            {error, ErrorMessage}
+                    after TimeToWait -> {error, <<"timeout">>}
+                    end;
+                {error, {connection_pool_exhausted, Message}} ->
+                    % Specific handling for connection pool exhaustion
+                    % Could implement retry logic, backpressure, etc.
+                    {error, Message};
+                {error, {ErrorCode, ErrorMessage}} ->
+                    % Handle other types of errors
+                    io:format("Got error from AS: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+                    {error, ErrorMessage}
+            end;
+        _ ->
+            SyncCmd()
+    end.
 
 -spec binary_remove(binary(), binary(), binary(), [binary()], integer()) -> 
     {ok, string()} | {error, string()}.

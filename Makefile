@@ -6,7 +6,7 @@ deps:
 compile: compile_aerospike_client compile_gateway_client compile_erl
 
 compile_aerospike_client:
-	make -C aerospike-client-c
+	make -C aerospike-client-c EVENT_LIB=libev
 
 compile_gateway_client:
 	make -C c_src

@@ -25,3 +25,4 @@ rebar.lock
 .vscode/
 tmp/
 
+CLAUDE.md

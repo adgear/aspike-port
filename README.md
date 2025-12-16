@@ -31,6 +31,11 @@ If you need to talk to aerospike in AQL you can run the aql utility:
 docker run -ti aerospike/aerospike-tools:latest aql -h 172.17.0.2
 ```
 
+If you need to run AS Admin (ASADM) you can run next command:
+```bash
+docker run -ti aerospike/aerospike-tools:latest asadm -h 172.17.0.2
+```
+
 ## Building aspike-port
 
 Just run make:
@@ -43,17 +48,18 @@ $ make
 
 To start the Aerospike client, run the erlang shell:
 ```bash
-erl -pa _build/default/lib/*/ebin
+erl -pa _build/default/lib/aspike_port/ebin
 ```
 and then run next code to initialize NIF connection:
 ```erlang
 application:set_env(aspike_port, host, "172.17.0.2").
-application:set_env(aspike_port, psw, "").
 application:set_env(aspike_port, port, 3000).
 application:set_env(aspike_port, user, "").
+application:set_env(aspike_port, psw, "").
 aspike_nif:as_init().
 aspike_nif:host_add().
 aspike_nif:connect().
+aspike_nif_perf:mp_insert(10, 10, 0).
 ```
 
 Next you can run very basic commands just to make sure the connection working and aerospike is able to
@@ -87,8 +93,8 @@ it will produce 2 files: /tmp/read_stats.txt and /tmp/insert_stats.txt
 ### Multi-process tests
 
 ```erlang
-aspike_nif_perf:mp_insert(10, 1_000_000, 0).
-aspike_nif_perf:mp_reads(20, 1_000_000, 0).
+aspike_nif_perf:mp_insert(40, 1_000_000, 0).
+aspike_nif_perf:mp_reads(40, 1_000_000, 0).
 ```
 
 It will run 10 concurrent insert processes, each will insert 1000000 keys, with 0ms delay
