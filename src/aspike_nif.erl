@@ -168,6 +168,41 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
+call_aerospike_nif(SyncCmd, AsyncCmd) ->
+    DoAsyncApi = persistent_term:get(aspike_async_api, false),
+    case DoAsyncApi of
+        true ->
+            % TODO: determine a value for TTL
+            TimeToWait = 1000, % in ms
+            Res = AsyncCmd(),
+            %io:format("Result from async launch: ~p~n", [Res]),
+            case Res of
+                {ok, put} ->
+                    % Operation has completed, probably there is just nothing to do, like
+                    % the bin list is empty
+                    {ok, put};
+                {ok, in_progress} ->
+                    % Request is accepted for processing
+                    receive
+                        {ok, Response} -> {ok, Response};
+                        {error, {ErrorCode, ErrorMessage}} ->
+                            io:format("Got error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+                            {error, ErrorMessage}
+                    after TimeToWait -> {error, <<"timeout">>}
+                    end;
+                {error, {connection_pool_exhausted, Message}} ->
+                    % Specific handling for connection pool exhaustion
+                    % Could implement retry logic, backpressure, etc.
+                    {error, Message};
+                {error, {ErrorCode, ErrorMessage}} ->
+                    % Handle other types of errors
+                    io:format("Got error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+                    {error, ErrorMessage}
+            end;
+        _ ->
+            SyncCmd()
+    end.
+
 key_exists() ->
     key_exists(?DEFAULT_KEY).
 
@@ -243,39 +278,7 @@ cdt_put_sync(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
 cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 
-call_aerospike_nif(SyncCmd, AsyncCmd) ->
-    DoAsync = true,
-    case DoAsync of
-        true ->
-            % TODO: determine a value for TTL
-            TimeToWait = 1000, % in ms
-            Res = AsyncCmd(),
-            %io:format("Result from async launch: ~p~n", [Res]),
-            case Res of
-                {ok, in_progress} ->
-                    % Request is accepted for processing
-                    receive
-                        aspike_ok -> {ok, <<"">>};
-                        {aspike_ok, Response} -> {ok, Response};
-                        {error, {ErrorCode, ErrorMessage}} ->
-                            io:format("Got error from AS: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
-                            {error, ErrorMessage}
-                    after TimeToWait -> {error, <<"timeout">>}
-                    end;
-                {error, {connection_pool_exhausted, Message}} ->
-                    % Specific handling for connection pool exhaustion
-                    % Could implement retry logic, backpressure, etc.
-                    {error, Message};
-                {error, {ErrorCode, ErrorMessage}} ->
-                    % Handle other types of errors
-                    io:format("Got error from AS: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
-                    {error, ErrorMessage}
-            end;
-        _ ->
-            SyncCmd()
-    end.
-
--spec binary_remove(binary(), binary(), binary(), [binary()], integer()) -> 
+-spec binary_remove(binary(), binary(), binary(), [binary()], integer()) ->
     {ok, string()} | {error, string()}.
 binary_remove(_Namespace, _Set, _Key, _BinNameList, _TTL) ->
     not_loaded(?LINE).
@@ -286,7 +289,7 @@ key_remove() ->
 key_remove(Key) ->
     key_remove(?DEFAULT_NAMESPACE, ?DEFAULT_SET, Key).
 
-% @doc Removes Key from  Namesplace Set
+% @doc Removes Key from Namespace Set
 -spec key_remove(string(), string(), string()) -> {ok, string()} | {error, string()}.
 key_remove(Namespace, Set, Key) when is_list(Namespace), is_list(Set), is_list(Key) ->
     not_loaded(?LINE).

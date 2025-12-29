@@ -60,6 +60,7 @@ struct cdt_put_callback_data {
 
 // Callback function for async cdt_put operation
 static void cdt_put_async_callback(as_error* err, as_record* record, void* udata, as_event_loop* event_loop) {
+    ERL_NIF_TERM erl_ok = get_erl_ok();
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM result_msg;
 
@@ -84,9 +85,8 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_error, error_tuple);
     } else {
-        ERL_NIF_TERM aspike_ok = enif_make_atom(cb_data->msg_env, "aspike_ok");
         ERL_NIF_TERM response = enif_make_string(cb_data->msg_env, "put", ERL_NIF_UTF8);
-        result_msg = enif_make_tuple2(cb_data->msg_env, aspike_ok, response);
+        result_msg = enif_make_tuple2(cb_data->msg_env, erl_ok, response);
     }
 
     // Send message to calling Erlang process
@@ -103,26 +103,26 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
-    ErlNifBinary bin_ns;
-    if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
+    ErlNifBinary erl_namespace;
+    if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
         return enif_make_badarg(env);
     }
     std::string name_space;
-    name_space.assign((const char*)bin_ns.data, bin_ns.size);
+    name_space.assign((const char*)erl_namespace.data, erl_namespace.size);
 
-    ErlNifBinary bin_set;
-    if (!enif_inspect_binary(env, argv[1], &bin_set)) {
+    ErlNifBinary erl_set_name;
+    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
         return enif_make_badarg(env);
     }
-    std::string aspk_set_name;
-    aspk_set_name.assign((const char*)bin_set.data, bin_set.size);
+    std::string set_name;
+    set_name.assign((const char*)erl_set_name.data, erl_set_name.size);
 
-    ErlNifBinary bin_primary_key;
-    if (!enif_inspect_binary(env, argv[2], &bin_primary_key)) {
+    ErlNifBinary erl_primary_key;
+    if (!enif_inspect_binary(env, argv[2], &erl_primary_key)) {
         return enif_make_badarg(env);
     }
-    std::string aspk_primary_key;
-    aspk_primary_key.assign((const char*)bin_primary_key.data, bin_primary_key.size);
+    std::string record_primary_key;
+    record_primary_key.assign((const char*)erl_primary_key.data, erl_primary_key.size);
 
     unsigned int bins_amount;
     ERL_NIF_TERM bins = argv[3];
@@ -131,13 +131,19 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     }
     // now the list points to structure like
     // [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}]
+    ERL_NIF_TERM rc, msg;
+    if (bins_amount == 0) {
+        // just a check if there is something we should do at all
+        rc = erl_ok;
+        msg = enif_make_string(env, "put", ERL_NIF_UTF8);
+        return enif_make_tuple2(env, rc, msg);
+    }
 
     long ttl;
     if (!enif_get_long(env, argv[4], &ttl)) {
         return enif_make_badarg(env);
     }
 
-    // {max_retries, sleep_between_retries, socket_timeout, total_timeout}
     const ERL_NIF_TERM* cdt_put_policy = NULL;
     int policy_length;
     long max_retries = 0;
@@ -153,13 +159,6 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     enif_get_long(env, cdt_put_policy[2], &socket_timeout);
     enif_get_long(env, cdt_put_policy[3], &total_timeout);
 
-    ERL_NIF_TERM rc, msg;
-    if (bins_amount == 0) {
-        rc = erl_ok;
-        msg = enif_make_string(env, "put", ERL_NIF_UTF8);
-        return enif_make_tuple2(env, rc, msg);
-    }
-
     CHECK_ALL
 
     // Allocate callback data with proper initialization on heap
@@ -171,8 +170,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
         return enif_make_tuple2(env, erl_error, enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8));
     }
 
-    as_key key;
-    as_key_init_str(&key, name_space.c_str(), aspk_set_name.c_str(), aspk_primary_key.c_str());
+    as_key record_key;
+    as_key_init_str(&record_key, name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
     as_record_inita(&cb_data->rec, bins_amount);
     if (ttl != 0) {
         cb_data->rec.ttl = ttl;
@@ -335,7 +334,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
     ERL_NIF_TERM return_data;
     as_error err;
-    as_status status = aerospike_key_operate_async(as, &err, &policy, &key, &operations, cdt_put_async_callback, cb_data, NULL, NULL);
+    as_status status = aerospike_key_operate_async(as, &err, &policy, &record_key, &operations, cdt_put_async_callback, cb_data, NULL, NULL);
 
     if (status != AEROSPIKE_OK) {
         // Failed to initiate async operation
@@ -359,7 +358,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
         return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "in_progress"));
     }
 
-    as_key_destroy(&key);
+    as_key_destroy(&record_key);
     as_operations_destroy(&operations);
 
     return return_data;

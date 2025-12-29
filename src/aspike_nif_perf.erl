@@ -40,8 +40,8 @@
 -define(FCAP_BIN, <<"fcap_map">>).
 
 dima_init() ->
-    %io:format("set host: ~p~n", [application:set_env(aspike_port, host, "127.0.0.1")]),
-    io:format("set host: ~p~n", [application:set_env(aspike_port, host, "192.168.88.69")]),
+    io:format("set host: ~p~n", [application:set_env(aspike_port, host, "127.0.0.1")]),
+    %io:format("set host: ~p~n", [application:set_env(aspike_port, host, "192.168.88.69")]),
     io:format("set port: ~p~n", [application:set_env(aspike_port, port, 3000)]),
     io:format("set user: ~p~n", [application:set_env(aspike_port, user, "")]),
     io:format("set passwd: ~p~n", [application:set_env(aspike_port, psw, "")]),
