@@ -218,21 +218,29 @@ key_put(Namespace, Set, Key, Lst) when
 binary_put(_Namespace, _Set, _Key, _BinList, _TTL) ->
     not_loaded(?LINE).
 
-% {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}  timeouts in milliseconds
-cdt_put(Namespace, Set, Key, BinList, TTL) ->
-    cdt_put(Namespace, Set, Key, BinList, TTL, {0, 0, 30000, 1000}).
+% in cdt_put() the BinList looks like:
+% [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}]
+% which will be transformed into map
+% KEY_ORDERED_MAP('{"map_key_1":{"ttl":123, "value":"map_value_1", "wt":1766794574}, "map_key_2":{"ttl":456, "value":"map_value_2", "wt":1766794574}}')
+% to be stored in Aerospike under the bin name "fcap_map".
+% 'wt' key is added by NIF implementation of cdt_put() and basically a timestamp of write time (wt).
+% Policy is a tuple expanded as
+% {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}
+% timeouts should be given in milliseconds
+cdt_put(Namespace, Set, RecordKeyName, BinList, TTL) ->
+    cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, {0, 0, 30000, 1000}).
 -spec cdt_put(binary(), binary(), binary(), 
         [{binary(), binary()|integer()|[integer()]}], integer(), 
         {integer(), integer(), integer(), integer()}) -> 
             {ok, string()} | {error, string()}.
-cdt_put(Namespace, Set, Key, BinList, TTL, Policy) ->
-    SyncCmd = fun() -> cdt_put_sync(Namespace, Set, Key, BinList, TTL, Policy) end,
-    AsyncCmd = fun() -> cdt_put_async(Namespace, Set, Key, BinList, TTL, Policy) end,
+cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
+    SyncCmd = fun() -> cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy) end,
+    AsyncCmd = fun() -> cdt_put_async(Namespace, Set, RecordKeyName, BinList, TTL, Policy) end,
     call_aerospike_nif(SyncCmd, AsyncCmd).
 
-cdt_put_sync(_Namespace, _Set, _Key, _BinList, _TTL, _Policy) ->
+cdt_put_sync(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
-cdt_put_async(_Namespace, _Set, _Key, _BinList, _TTL, _Policy) ->
+cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 
 call_aerospike_nif(SyncCmd, AsyncCmd) ->
@@ -242,13 +250,13 @@ call_aerospike_nif(SyncCmd, AsyncCmd) ->
             % TODO: determine a value for TTL
             TimeToWait = 1000, % in ms
             Res = AsyncCmd(),
-            io:format("Result from async launch: ~p~n", [Res]),
+            %io:format("Result from async launch: ~p~n", [Res]),
             case Res of
                 {ok, in_progress} ->
                     % Request is accepted for processing
                     receive
-                        aspike_ok -> ok;
-                        {aspike_ok, Response} -> Response;
+                        aspike_ok -> {ok, <<"">>};
+                        {aspike_ok, Response} -> {ok, Response};
                         {error, {ErrorCode, ErrorMessage}} ->
                             io:format("Got error from AS: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
                             {error, ErrorMessage}

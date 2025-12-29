@@ -30,6 +30,15 @@ If you need to talk to aerospike in AQL you can run the aql utility:
 ```bash
 docker run -ti aerospike/aerospike-tools:latest aql -h 172.17.0.2
 ```
+and there you can run sample queries like
+```sql
+SELECT * FROM test.rtb_setname
+```
+to see all records from that namespace/set, or
+```sql
+SELECT * FROM test.rtb_setname WHERE PK = 'user_defined_PK'
+```
+to see specific record that namespace/set.
 
 If you need to run AS Admin (ASADM) you can run next command:
 ```bash
@@ -65,24 +74,24 @@ aspike_nif_perf:mp_insert(10, 10, 0).
 Next you can run very basic commands just to make sure the connection working and aerospike is able to
 accept and store the data:
 ```erlang
-aspike_nif:cdt_put(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>, [{<<"fcap_map">>, [<<"campaign1">>, <<"campaign1_value">>, 123, <<"campaign2">>, <<"campaign2_value">>, 456]}], 300).
-aspike_nif:cdt_get(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>).
+aspike_nif:cdt_put(<<"test">>, <<"rtb_setname">>, <<"user_defined_PK">>, [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}], 300).
+aspike_nif:cdt_get(<<"test">>, <<"rtb_setname">>, <<"user_defined_PK">>).
 ```
 
 ### Single process tests
 
 To run a single producer process:
 ```erlang
-aspike_nif_perf:sp_insert(<<"test">>, <<"rtb-gateway-fcap-users">>, 1_000_000, 3600, 0, 1_000_000_000_000, 0, 0).
+aspike_nif_perf:sp_insert(<<"test">>, <<"rtb_setname">>, 1_000_000, 3600, 0, 1_000_000_000_000, 0, 0).
 ```
-it will insert 1_000_000 keys to namespace=test, set=rtb-gateway-fcap-users. Data TTL=3600 seconds. Delay between operations = 0ms. Initial key value = 1_000_000_000_000. (key will be 1_000_001_000_000 ... 1_000_001_999_999).
+it will insert 1_000_000 keys to namespace=test, set=rtb_setname. Data TTL=3600 seconds. Delay between operations = 0ms. Initial key value = 1_000_000_000_000. (key will be 1_000_001_000_000 ... 1_000_001_999_999).
 Function will return: {Number_of_success_operations, Number_of_errors}.
 
 To run a single consumer process:
 ```erlang
-aspike_nif_perf:sp_read(<<"test">>, <<"rtb-gateway-fcap-users">>, 1_000_000, 0, 1_000_000_000_000, 0, 0, 0).
+aspike_nif_perf:sp_read(<<"test">>, <<"rtb_setname">>, 1_000_000, 0, 1_000_000_000_000, 0, 0, 0).
 ```
-it will read from namespace=test, set=rtb-gateway-fcap-users. Delay between operations = 0ms. Initial key value = 1_000_000_000_000. (key will be 1_000_001_000_000 ... 1_000_001_999_999).
+it will read from namespace=test, set=rtb_setname. Delay between operations = 0ms. Initial key value = 1_000_000_000_000. (key will be 1_000_001_000_000 ... 1_000_001_999_999).
 
 To get the raw stats:
 ```erlang

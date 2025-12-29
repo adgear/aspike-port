@@ -203,7 +203,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
         ErlNifBinary bin_bin;
-        std::string bin_str, bin_str_val;
+        std::string bin_str;
         int t_length;
         const ERL_NIF_TERM* tuple = NULL;
         // as_bytes as_bytes_val;
@@ -236,7 +236,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
         as_string key_str, subkey1, subkey2, subkey3;
         as_bytes subval1;
         as_integer subval2, subval3;
-        std::string fcap_key, fcap_val, valuesk, valuesk1, valuesk2;
+        std::string fcap_key, valuesk, valuesk1, valuesk2;
         long i64;
         for (uint ts_i = 0; ts_i < ts_length; ts_i++) {
             ERL_NIF_TERM ts_head;
@@ -1211,7 +1211,7 @@ ERL_NIF_TERM aspike_nif_binary_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
         ErlNifBinary bin_bin, bin_val;
-        std::string bin_str, bin_str_val;
+        std::string bin_str;
         int t_length;
         const ERL_NIF_TERM* tuple = NULL;
         //as_bytes as_bytes_val;

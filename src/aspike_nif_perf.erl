@@ -3,7 +3,9 @@
 -export([
     dima_init/0,
     dima_insert/0,
+    dima_quick_test/0,
     dima_test/0,
+    dima_stress_test/3,
    sp_insert/9,
    sp_insert/8,
    pool_insert/8,
@@ -38,7 +40,8 @@
 -define(FCAP_BIN, <<"fcap_map">>).
 
 dima_init() ->
-    io:format("set host: ~p~n", [application:set_env(aspike_port, host, "172.17.0.2")]),
+    %io:format("set host: ~p~n", [application:set_env(aspike_port, host, "127.0.0.1")]),
+    io:format("set host: ~p~n", [application:set_env(aspike_port, host, "192.168.88.69")]),
     io:format("set port: ~p~n", [application:set_env(aspike_port, port, 3000)]),
     io:format("set user: ~p~n", [application:set_env(aspike_port, user, "")]),
     io:format("set passwd: ~p~n", [application:set_env(aspike_port, psw, "")]),
@@ -47,12 +50,70 @@ dima_init() ->
     io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]).
 
 dima_insert() ->
-    InsertRes = aspike_nif:cdt_put(<<"test">>, <<"rtb-gateway-fcap-users2">>, <<"aaa11">>, [{<<"fcap_map">>, [<<"campaign1">>, <<"campaign1_value">>, 123, <<"campaign2">>, <<"campaign2_value">>, 456]}], 300),
+    InsertRes = aspike_nif:cdt_put(<<"test">>, <<"rtb_setname">>, <<"aaa11">>, [{<<"fcap_map">>, [<<"campaign1">>, <<"campaign1_value">>, 123, <<"campaign2">>, <<"campaign2_value">>, 456]}], 300),
     io:format("cdt_put result: ~p~n", [InsertRes]).
+
+dima_quick_test() ->
+    dima_init(),
+    Namespace = <<"test">>,
+    SetName = <<"rtb_setname">>,
+    PrimaryKey = <<"user_defined_key">>,
+    InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}], 300),
+    io:format("cdt_put result: ~p~n", [InsertRes]),
+    ReadRes = aspike_nif:cdt_get(Namespace, SetName, PrimaryKey),
+    io:format("cdt_get result: ~p~n", [ReadRes]).
 
 dima_test() ->
     dima_init(),
-    dima_insert().
+    dima_stress_test(1, 1000, 0).
+
+dima_stress_test (NProc, AmountOfInserts, Sleep) ->
+    Namespace = <<"test">>,
+    SetName = <<"rtb-gateway-fcap-users">>,
+
+    ActionFunc = fun(Counter) ->
+        Key = integer_to_binary(Counter),
+        Bins = [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}],
+        TTL = 3600,
+        aspike_nif:cdt_put(Namespace, SetName, Key, Bins, TTL)
+    end,
+
+    lists:map(fun(ProcNumber) ->
+        spawn(fun() ->
+            Counter = 1_000_000_000_000 * ProcNumber,
+            ProcName = integer_to_list(ProcNumber),
+            StartTime = erlang:system_time(microsecond),
+            Results = dima_stress_test_loop(ProcName, ActionFunc, AmountOfInserts, Counter, Sleep, 0, 0),
+            EndTime = erlang:system_time(microsecond),
+            InsertTime = EndTime - StartTime,
+            TimePerInsert = (EndTime - StartTime) div AmountOfInserts,
+            { OpsDone, ErrorsMet } = Results,
+            io:format("Result from child ~p: ops done: ~p, errors met: ~p, total time: ~p µs, avg time per insert : ~p µs ~n", [ProcNumber, OpsDone, ErrorsMet, InsertTime, TimePerInsert])
+        end)
+    end, lists:seq(1, NProc)).
+
+dima_stress_test_loop (_, _, 0, _, _, Oks, Errs) -> {Oks, Errs};
+
+dima_stress_test_loop (ProcName, ActionFunc, AmountOfInserts, Counter, Sleep, Oks, Errs) ->
+    case AmountOfInserts rem 10000 of
+        0 -> io:format("~s: writes left to do: ~p ~n", [ProcName, AmountOfInserts]);
+        _ -> ok
+    end,
+
+    Result = ActionFunc(Counter),
+
+    {OpsDone, ErrorsMet} = case Result of
+        {ok, _} -> {Oks + 1, Errs};
+        {error, ErrorMessage} ->
+            io:format("~s: got error: ~s~n", [ProcName, ErrorMessage]),
+            {Oks, Errs + 1}
+    end,
+
+    case Sleep of
+        0 -> ok;
+        _ -> timer:sleep(rand:uniform(Sleep))
+    end,
+    dima_stress_test_loop(ProcName, ActionFunc, AmountOfInserts - 1, Counter + 1, Sleep, OpsDone, ErrorsMet).
 
 % aspike_nif:cdt_put(<<"test">>, <<"someSet">>, <<"keyName">>, [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}], 10).
 % aspike_nif:cdt_get(<<"test">>, <<"someSet">>, <<"keyName">>).

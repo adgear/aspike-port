@@ -39,7 +39,7 @@
 struct cdt_put_callback_data {
     ErlNifPid caller_pid;  // Erlang process to send result to
     ErlNifEnv* msg_env;    // Environment for creating response message
-    std::vector<as_cdt_ctx*> ctx_vec;
+    std::vector<as_cdt_ctx*> contexts;
     as_record rec;
 
     // Constructor to properly initialize
@@ -52,9 +52,8 @@ struct cdt_put_callback_data {
         if (msg_env) {
             enif_free_env(msg_env);
         }
-        // Cleanup Aerospike resources
-        for (as_cdt_ctx* pctx : ctx_vec) {
-            as_cdt_ctx_destroy(pctx);
+        for (auto ctx : contexts) {
+            as_cdt_ctx_destroy(ctx);
         }
     }
 };
@@ -104,31 +103,36 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
-    ErlNifBinary bin_ns, bin_set, bin_key;
-    unsigned int bins_amount;
-    std::string name_space, aspk_set, aspk_key;
-    long ttl;
-
+    ErlNifBinary bin_ns;
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
         return enif_make_badarg(env);
     }
+    std::string name_space;
     name_space.assign((const char*)bin_ns.data, bin_ns.size);
 
+    ErlNifBinary bin_set;
     if (!enif_inspect_binary(env, argv[1], &bin_set)) {
         return enif_make_badarg(env);
     }
-    aspk_set.assign((const char*)bin_set.data, bin_set.size);
+    std::string aspk_set_name;
+    aspk_set_name.assign((const char*)bin_set.data, bin_set.size);
 
-    if (!enif_inspect_binary(env, argv[2], &bin_key)) {
+    ErlNifBinary bin_primary_key;
+    if (!enif_inspect_binary(env, argv[2], &bin_primary_key)) {
         return enif_make_badarg(env);
     }
-    aspk_key.assign((const char*)bin_key.data, bin_key.size);
+    std::string aspk_primary_key;
+    aspk_primary_key.assign((const char*)bin_primary_key.data, bin_primary_key.size);
 
-    ERL_NIF_TERM list = argv[3];
-    if (!enif_is_list(env, list) || !enif_get_list_length(env, list, &bins_amount)) {
+    unsigned int bins_amount;
+    ERL_NIF_TERM bins = argv[3];
+    if (!enif_is_list(env, bins) || !enif_get_list_length(env, bins, &bins_amount)) {
         return enif_make_badarg(env);
     }
+    // now the list points to structure like
+    // [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}]
 
+    long ttl;
     if (!enif_get_long(env, argv[4], &ttl)) {
         return enif_make_badarg(env);
     }
@@ -158,16 +162,17 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
     CHECK_ALL
 
-    // Allocate callback data with proper initialization
+    // Allocate callback data with proper initialization on heap
     cdt_put_callback_data* cb_data = new cdt_put_callback_data(env);
 
     // Get caller PID and create callback data
     if (!enif_self(env, &cb_data->caller_pid)) {
+        delete cb_data;
         return enif_make_tuple2(env, erl_error, enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8));
     }
 
     as_key key;
-    as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
+    as_key_init_str(&key, name_space.c_str(), aspk_set_name.c_str(), aspk_primary_key.c_str());
     as_record_inita(&cb_data->rec, bins_amount);
     if (ttl != 0) {
         cb_data->rec.ttl = ttl;
@@ -179,96 +184,144 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     as_operations operations;
     std::vector<as_bytes*> bin_vec;
     for (uint i = 0; i < bins_amount; i++) {
-        ERL_NIF_TERM head;
-        ERL_NIF_TERM tail;
-        ErlNifBinary bin_bin;
-        std::string bin_str, bin_str_val;
-        int t_length;
-        const ERL_NIF_TERM* tuple = NULL;
-        unsigned int ts_length;
 
-        if (!enif_get_list_cell(env, list, &head, &tail)) {
+        // each bin of
+        // {<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}
+        // will form a next map:
+        // KEY_ORDERED_MAP('{"map_key_1":{"ttl":123, "value":"map_value_1", "wt":1766794574}, "map_key_2":{"ttl":456, "value":"map_value_2", "wt":1766794574}}')
+        // which will be stored under a bin name "fcap_map". 
+
+        ERL_NIF_TERM bins_head;
+        ERL_NIF_TERM bins_tail;
+        if (!enif_get_list_cell(env, bins, &bins_head, &bins_tail)) {
             break;
         }
-        if (!enif_get_tuple(env, head, &t_length, &tuple) || t_length != 2) {
-            // Cleanup and return error
-            delete cb_data;
-            return enif_make_badarg(env);
-        }
+        // now, the bins_head points to something like {<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}
 
-        if (!enif_inspect_binary(env, tuple[0], &bin_bin)) {
+        int tuple_length;
+        const ERL_NIF_TERM* bin_tuple = NULL;
+        if (!enif_get_tuple(env, bins_head, &tuple_length, &bin_tuple) || tuple_length != 2) {
+            // Cleanup and return error if failed to read tuple or if the amount
+            // of items in the tuple is not equal to 2
             delete cb_data;
             return enif_make_badarg(env);
         }
-        bin_str.assign((const char*)bin_bin.data, bin_bin.size);
+        // now bin_tuple points to something like {<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}
 
-        if (!enif_is_list(env, tuple[1]) || !enif_get_list_length(env, tuple[1], &ts_length)) {
+        ErlNifBinary erl_bin_name;
+        if (!enif_inspect_binary(env, bin_tuple[0], &erl_bin_name)) {
             delete cb_data;
             return enif_make_badarg(env);
         }
-        auto ts_list = tuple[1];
-        as_operations_inita(&operations, ts_length + 1);
+        std::string bin_name;
+        bin_name.assign((const char*)erl_bin_name.data, erl_bin_name.size);
+        // now bin_name has a value like "fcap_map"
+
+        unsigned int bin_data_len;
+        if (!enif_is_list(env, bin_tuple[1]) || !enif_get_list_length(env, bin_tuple[1], &bin_data_len)) {
+            delete cb_data;
+            return enif_make_badarg(env);
+        }
+        auto bin_data = bin_tuple[1];
+        // bin_data points to something like [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]
+
+        as_operations_inita(&operations, bin_data_len + 1);
         if (ttl != 0) {
             operations.ttl = ttl;
         } else {
             operations.ttl = -2;
         }
         uint opnum = 0;
-        ErlNifBinary bin_key_local, bin_val;
-        as_string key_str, subkey1, subkey2, subkey3;
-        as_bytes subval1;
-        as_integer subval2, subval3;
-        std::string fcap_key, fcap_val, valuesk, valuesk1, valuesk2;
-        long i64;
-        for (uint ts_i = 0; ts_i < ts_length; ts_i++) {
-            ERL_NIF_TERM ts_head;
-            ERL_NIF_TERM ts_tail;
-            if (!enif_get_list_cell(env, ts_list, &ts_head, &ts_tail)) {
+        for (uint k = 0; k < bin_data_len; k++) {
+            ERL_NIF_TERM data_head;
+            ERL_NIF_TERM data_tail;
+            if (!enif_get_list_cell(env, bin_data, &data_head, &data_tail)) {
                 break;
             }
 
+            // the following code forms a map with structure like:
+            // KEY_ORDERED_MAP(
+            //     "map_key_1": {
+            //         "ttl":123,
+            //         "value":"map_value_1",
+            //         "wt":1766794574
+            //     },
+            //     "map_key_2": {
+            //         "ttl":456,
+            //         "value":"map_value_2",
+            //         "wt":1766794574
+            //     }
+            //     ...
+            // )
+            // the first-level map key name and the values of second-level 'value' and 'ttl'
+            // keys are read one by one from 'bin_data' array with 'opnum' variable indicating
+            // which value we are reading now
+
             if (opnum == 0) {
-                // getting fcap key
-                cb_data->ctx_vec.push_back(as_cdt_ctx_create(1));
-                if (enif_inspect_binary(env, ts_head, &bin_key_local)) {
-                    fcap_key.assign((const char*)bin_key_local.data, bin_key_local.size);
-                    as_string_init(&key_str, (char*)fcap_key.c_str(), false);
-                    as_cdt_ctx_add_map_key_create(cb_data->ctx_vec.back(), (as_val*)&key_str, AS_MAP_KEY_ORDERED);
+                // with optnum == 0 it's a first-level key name.
+                // The value of this key will be another map, so let's create a context for
+                // this map
+                as_cdt_ctx* context = as_cdt_ctx_create(1);
+                // save context for later removal
+                cb_data->contexts.push_back(context);
+                // getting first level key name
+                ErlNifBinary erl_key_name;
+                if (enif_inspect_binary(env, data_head, &erl_key_name)) {
+                    // erl_key_name points to something like <<"map_key_1">>.
+                    // Now, make a copy of the string on heap so aerospike will be able to free its memory once
+                    // the 'key_name' variable will be destroyed.
+                    // And since there is no as_string_new_strndup() method, we have to emulate it:
+                    char * copy_on_heap = (char *)strndup((const char *)erl_key_name.data, erl_key_name.size);
+                    // create aerospike string which will be freed by context on its removal
+                    as_string* key_name = as_string_new(copy_on_heap, true);
+                    as_cdt_ctx_add_map_key_create(context, (as_val*)key_name, AS_MAP_KEY_ORDERED);
                 }
                 opnum++;
             } else if (opnum == 1) {
-                // getting fcap value
-                if (enif_inspect_binary(env, ts_head, &bin_val)) {
-                    valuesk = "value";
-                    as_string_init(&subkey1, (char*)valuesk.c_str(), false);
-                    as_bytes_inita(&subval1, bin_val.size);
-                    as_bytes_set(&subval1, 0, bin_val.data, bin_val.size);
-                    as_operations_map_put(&operations, bin_str.c_str(), cb_data->ctx_vec.back(), &put_mode, (as_val*)&subkey1, (as_val*)&subval1);
+                // with optnum == 1 it's a value for 'value' key on second-level map
+                ErlNifBinary erl_value_data;
+                if (enif_inspect_binary(env, data_head, &erl_value_data)) {
+                    // erl_value_data points to something like <<"map_value_1">>.
+                    // Create aerospike string (a second level key name) which will be freed by context on its removal.
+                    as_string* key_name = as_string_new_strdup("value");
+                    as_bytes value_data;
+                    as_bytes_inita(&value_data, erl_value_data.size);
+                    as_bytes_set(&value_data, 0, erl_value_data.data, erl_value_data.size);
+                    // next line creates a key 'value' in the map we created above in 'opnum == 1'
+                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)&value_data);
                 }
                 opnum++;
             } else if (opnum == 2) {
-                // getting subkey ttl
-                if (enif_get_int64(env, ts_head, &i64)) {
-                    valuesk1 = "ttl";
-                    as_string_init(&subkey2, (char*)valuesk1.c_str(), false);
-                    as_integer_init(&subval2, i64);
-                    as_operations_map_put(&operations, bin_str.c_str(), cb_data->ctx_vec.back(), &put_mode, (as_val*)&subkey2, (as_val*)&subval2);
+                // with optnum == 2 it's a value for 'ttl' key on second-level map
+                long i64;
+                if (enif_get_int64(env, data_head, &i64)) {
+                    // i64 points to something like 123.
+                    // Create aerospike string (a second level key name) which will be freed by context on its removal.
+                    as_string* key_name = as_string_new_strdup("ttl");
+                    as_integer ttl_value;
+                    as_integer_init(&ttl_value, i64);
+                    // next line creates a key 'ttl' in the map we created above in 'opnum == 1'
+                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)&ttl_value);
                 }
-                opnum = 0;
-                // subkey write time
+
+                // let's create a 'wt' key on second-level map
+                // Create aerospike string (a second level key name) which will be freed by context on its removal.
+                as_string* key_name = as_string_new_strdup("wt");
+                as_integer wt_value;
                 auto now = std::chrono::system_clock::now().time_since_epoch();
-                long wt = std::chrono::duration_cast<std::chrono::seconds>(now).count();
-                valuesk2 = "wt";
-                as_string_init(&subkey3, (char*)valuesk2.c_str(), false);
-                as_integer_init(&subval3, wt);
-                as_operations_map_put(&operations, bin_str.c_str(), cb_data->ctx_vec.back(), &put_mode, (as_val*)&subkey3, (as_val*)&subval3);
+                long timestamp = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                as_integer_init(&wt_value, timestamp);
+                // next line creates a key 'wt' in the map we created above in 'opnum == 1'
+                as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)&wt_value);
+
+                opnum = 0;
             } else {
                 break;
             }
 
-            ts_list = ts_tail;
+            bin_data = data_tail;
         }
-        list = tail;
+        bins = bins_tail;
     }
 
     // Set up async policy
@@ -294,7 +347,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
         snprintf(int_buffer, sizeof(int_buffer), "%d", err.code);
         ERL_NIF_TERM error_code = enif_make_atom(env, int_buffer);
         ERL_NIF_TERM error_msg;
-        if (err.message) {
+        if (strlen(err.message) != 0) {
             error_msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
         } else {
             error_msg = enif_make_string(env, "Unknown error occurred", ERL_NIF_UTF8);
