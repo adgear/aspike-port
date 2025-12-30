@@ -198,7 +198,6 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     // as_map_policy_set(&put_mode, AS_MAP_UNORDERED, AS_MAP_UPDATE);
     as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
-    std::vector<as_bytes*> bin_vec;
     for (uint i = 0; i < length; i++) {
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;

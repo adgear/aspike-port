@@ -57,8 +57,11 @@ dima_quick_test() ->
     dima_init(),
     Namespace = <<"test">>,
     SetName = <<"rtb_setname">>,
-    PrimaryKey = <<"user_defined_key">>,
-    InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}], 300),
+    PrimaryKey = <<"user_defined_key_3">>,
+    InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, [
+        {<<"fcap_map_1">>, [<<"map_key_1_1">>, <<"map_value_1_1">>, 123, <<"map_key_1_2">>, <<"map_value_1_2">>, 456]},
+        {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<"map_value_2_1">>, 345, <<"map_key_2_2">>, <<"map_value_2_2">>, 678]}
+    ], 300),
     io:format("cdt_put result: ~p~n", [InsertRes]),
     ReadRes = aspike_nif:cdt_get(Namespace, SetName, PrimaryKey),
     io:format("cdt_get result: ~p~n", [ReadRes]).

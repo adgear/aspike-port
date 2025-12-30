@@ -40,7 +40,6 @@ struct cdt_put_callback_data {
     ErlNifPid caller_pid;  // Erlang process to send result to
     ErlNifEnv* msg_env;    // Environment for creating response message
     std::vector<as_cdt_ctx*> contexts;
-    as_record rec;
 
     // Constructor to properly initialize
     cdt_put_callback_data(ErlNifEnv* env) {
@@ -79,7 +78,11 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
             char int_buffer[32];
             snprintf(int_buffer, sizeof(int_buffer), "%d", err->code);
             error_code = enif_make_atom(cb_data->msg_env, int_buffer);
-            error_msg = enif_make_string(cb_data->msg_env, err->message, ERL_NIF_UTF8);
+            if (strlen(err->message) != 0) {
+                error_msg = enif_make_string(cb_data->msg_env, err->message, ERL_NIF_UTF8);
+            } else {
+                error_msg = enif_make_string(cb_data->msg_env, "Unknown error occurred", ERL_NIF_UTF8);
+            }
         }
         ERL_NIF_TERM error_tuple = enif_make_tuple2(cb_data->msg_env, error_code, error_msg);
 
@@ -159,7 +162,51 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     enif_get_long(env, cdt_put_policy[2], &socket_timeout);
     enif_get_long(env, cdt_put_policy[3], &total_timeout);
 
+    // We need to know upfront how many operations we are going to send to
+    // aerospike, and we can get that amount by walking thr provided bins
+    // and checking the lengths of data of bins.
+    // At the same time this is a good place to conduct some input validation
+    // so we don't have to do that later once we start memory allocations
+    uint total_operations = 0;
+    ERL_NIF_TERM bins_copy = bins; // Keep original for second pass
+    for (uint i = 0; i < bins_amount; i++) {
+        ERL_NIF_TERM bins_head, bins_tail;
+        if (!enif_get_list_cell(env, bins_copy, &bins_head, &bins_tail)) {
+            return enif_make_badarg(env);
+        }
+
+        int tuple_length;
+        const ERL_NIF_TERM* bin_tuple = NULL;
+        if (!enif_get_tuple(env, bins_head, &tuple_length, &bin_tuple) || tuple_length != 2) {
+            return enif_make_badarg(env);
+        }
+
+        ErlNifBinary erl_bin_name;
+        if (!enif_inspect_binary(env, bin_tuple[0], &erl_bin_name)) {
+            return enif_make_badarg(env);
+        }
+
+        unsigned int bin_data_len;
+        if (!enif_is_list(env, bin_tuple[1]) || !enif_get_list_length(env, bin_tuple[1], &bin_data_len)) {
+            return enif_make_badarg(env);
+        }
+        total_operations += bin_data_len;
+        bins_copy = bins_tail;
+    }
+    as_operations operations;
+    as_operations_inita(&operations, total_operations);
+    if (ttl != 0) {
+        operations.ttl = ttl;
+    } else {
+        operations.ttl = -2;
+    }
+
+    // by this time all checks are completed, as we assume the incoming data are clean,
+    // so let's check if we are connected to Aerospike
     CHECK_ALL
+
+    as_map_policy put_mode;
+    as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
     // Allocate callback data with proper initialization on heap
     cdt_put_callback_data* cb_data = new cdt_put_callback_data(env);
@@ -172,64 +219,34 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
     as_key record_key;
     as_key_init_str(&record_key, name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
-    as_record_inita(&cb_data->rec, bins_amount);
-    if (ttl != 0) {
-        cb_data->rec.ttl = ttl;
-    }
 
-    as_map_policy put_mode;
-    as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
-
-    as_operations operations;
-    std::vector<as_bytes*> bin_vec;
     for (uint i = 0; i < bins_amount; i++) {
-
         // each bin of
         // {<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}
         // will form a next map:
         // KEY_ORDERED_MAP('{"map_key_1":{"ttl":123, "value":"map_value_1", "wt":1766794574}, "map_key_2":{"ttl":456, "value":"map_value_2", "wt":1766794574}}')
         // which will be stored under a bin name "fcap_map". 
 
-        ERL_NIF_TERM bins_head;
-        ERL_NIF_TERM bins_tail;
-        if (!enif_get_list_cell(env, bins, &bins_head, &bins_tail)) {
-            break;
-        }
+        ERL_NIF_TERM bins_head, bins_tail;
+        enif_get_list_cell(env, bins, &bins_head, &bins_tail);
         // now, the bins_head points to something like {<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}
 
         int tuple_length;
         const ERL_NIF_TERM* bin_tuple = NULL;
-        if (!enif_get_tuple(env, bins_head, &tuple_length, &bin_tuple) || tuple_length != 2) {
-            // Cleanup and return error if failed to read tuple or if the amount
-            // of items in the tuple is not equal to 2
-            delete cb_data;
-            return enif_make_badarg(env);
-        }
+        enif_get_tuple(env, bins_head, &tuple_length, &bin_tuple);
         // now bin_tuple points to something like {<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}
 
         ErlNifBinary erl_bin_name;
-        if (!enif_inspect_binary(env, bin_tuple[0], &erl_bin_name)) {
-            delete cb_data;
-            return enif_make_badarg(env);
-        }
+        enif_inspect_binary(env, bin_tuple[0], &erl_bin_name);
         std::string bin_name;
         bin_name.assign((const char*)erl_bin_name.data, erl_bin_name.size);
         // now bin_name has a value like "fcap_map"
 
         unsigned int bin_data_len;
-        if (!enif_is_list(env, bin_tuple[1]) || !enif_get_list_length(env, bin_tuple[1], &bin_data_len)) {
-            delete cb_data;
-            return enif_make_badarg(env);
-        }
+        enif_get_list_length(env, bin_tuple[1], &bin_data_len);
         auto bin_data = bin_tuple[1];
         // bin_data points to something like [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]
 
-        as_operations_inita(&operations, bin_data_len + 1);
-        if (ttl != 0) {
-            operations.ttl = ttl;
-        } else {
-            operations.ttl = -2;
-        }
         uint opnum = 0;
         for (uint k = 0; k < bin_data_len; k++) {
             ERL_NIF_TERM data_head;
@@ -267,10 +284,16 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 ErlNifBinary erl_key_name;
                 if (enif_inspect_binary(env, data_head, &erl_key_name)) {
                     // erl_key_name points to something like <<"map_key_1">>.
-                    // Now, make a copy of the string on heap so aerospike will be able to free its memory once
-                    // the 'key_name' variable will be destroyed.
+                    // Now, make a copy of the string on heap (because the erl_key_name localed on stack)
+                    // so Aerospike will be able to free its memory once the 'key_name' variable will be destroyed.
                     // And since there is no as_string_new_strndup() method, we have to emulate it:
                     char * copy_on_heap = (char *)strndup((const char *)erl_key_name.data, erl_key_name.size);
+                    if (!copy_on_heap) {
+                        as_key_destroy(&record_key);
+                        as_operations_destroy(&operations);
+                        delete cb_data;
+                        return enif_make_tuple2(env, erl_error, enif_make_atom(env, "failed to allocate memory for erl_key_name"));
+                    }
                     // create aerospike string which will be freed by context on its removal
                     as_string* key_name = as_string_new(copy_on_heap, true);
                     as_cdt_ctx_add_map_key_create(context, (as_val*)key_name, AS_MAP_KEY_ORDERED);
@@ -283,11 +306,18 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     // erl_value_data points to something like <<"map_value_1">>.
                     // Create aerospike string (a second level key name) which will be freed by context on its removal.
                     as_string* key_name = as_string_new_strdup("value");
-                    as_bytes value_data;
-                    as_bytes_inita(&value_data, erl_value_data.size);
-                    as_bytes_set(&value_data, 0, erl_value_data.data, erl_value_data.size);
+                    // Make a copy of the data on heap (because the erl_value_data localed on stack)
+                    // so Aerospike will be able to free its memory once the 'value_data' variable will be destroyed.
+                    uint8_t * copy_on_heap = (uint8_t *)strndup((const char *)erl_value_data.data, erl_value_data.size);
+                    if (!copy_on_heap) {
+                        as_key_destroy(&record_key);
+                        as_operations_destroy(&operations);
+                        delete cb_data;
+                        return enif_make_tuple2(env, erl_error, enif_make_atom(env, "failed to allocate memory for erl_value_data"));
+                    }
+                    as_bytes* value_data = as_bytes_new_wrap(copy_on_heap, erl_value_data.size, true);
                     // next line creates a key 'value' in the map we created above in 'opnum == 1'
-                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)&value_data);
+                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)value_data);
                 }
                 opnum++;
             } else if (opnum == 2) {
@@ -297,21 +327,19 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     // i64 points to something like 123.
                     // Create aerospike string (a second level key name) which will be freed by context on its removal.
                     as_string* key_name = as_string_new_strdup("ttl");
-                    as_integer ttl_value;
-                    as_integer_init(&ttl_value, i64);
+                    as_integer* ttl_value = as_integer_new(i64);
                     // next line creates a key 'ttl' in the map we created above in 'opnum == 1'
-                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)&ttl_value);
+                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)ttl_value);
                 }
 
                 // let's create a 'wt' key on second-level map
                 // Create aerospike string (a second level key name) which will be freed by context on its removal.
                 as_string* key_name = as_string_new_strdup("wt");
-                as_integer wt_value;
                 auto now = std::chrono::system_clock::now().time_since_epoch();
                 long timestamp = std::chrono::duration_cast<std::chrono::seconds>(now).count();
-                as_integer_init(&wt_value, timestamp);
+                as_integer* wt_value = as_integer_new(timestamp);
                 // next line creates a key 'wt' in the map we created above in 'opnum == 1'
-                as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)&wt_value);
+                as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)wt_value);
 
                 opnum = 0;
             } else {

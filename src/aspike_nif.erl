@@ -169,9 +169,10 @@ connect(_, _) ->
     not_loaded(?LINE).
 
 call_aerospike_nif(SyncCmd, AsyncCmd) ->
-    DoAsyncApi = persistent_term:get(aspike_async_api, false),
+    DoAsyncApi = persistent_term:get(aspike_async_api, true),
     case DoAsyncApi of
         true ->
+            io:format("Doing ASYNC ...~n", []),
             % TODO: determine a value for TTL
             TimeToWait = 1000, % in ms
             Res = AsyncCmd(),
@@ -200,6 +201,7 @@ call_aerospike_nif(SyncCmd, AsyncCmd) ->
                     {error, ErrorMessage}
             end;
         _ ->
+            io:format("Doing SYNC ...~n", []),
             SyncCmd()
     end.
 
