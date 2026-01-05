@@ -10,8 +10,7 @@ For simplicity, run next command to download and run aerospike docker image:
 ```bash
 docker run -d --name aerospike --ulimit nofile=65536:65536 -p 3000:3000 -p 3001:3001 -p 3002:3002 -p 3003:3003 aerospike:ce-7.1.0.0
 ```
-This will download and store image and create a container under 'aerospike' name. Later you can reference this container
-with commands like:
+This will download and store image and create a container under 'aerospike' name. Later you can reference this container with commands like:
 ```bash
 docker stop aerospike
 docker start aerospike

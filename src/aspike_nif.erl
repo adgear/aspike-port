@@ -15,6 +15,7 @@
     host_list/0,
     connect/0,
     connect/2,
+    get_api_mode/1,
     key_exists/0,
     key_exists/1,
     key_exists/3,
@@ -168,11 +169,17 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
-call_aerospike_nif(SyncCmd, AsyncCmd) ->
-    DoAsyncApi = persistent_term:get(aspike_async_api, true),
+get_api_mode(_Method) ->
+    DoAsyncApi = persistent_term:get(aspike_async_api, false),
     case DoAsyncApi of
-        true ->
-            io:format("Doing ASYNC ...~n", []),
+        true -> async;
+        _ -> sync
+    end.
+
+call_aerospike_nif(SyncCmd, AsyncCmd) ->
+    case get_api_mode(nothing) of
+        async ->
+            %io:format("Doing ASYNC ...~n", []),
             % TODO: determine a value for TTL
             TimeToWait = 1000, % in ms
             Res = AsyncCmd(),
@@ -186,22 +193,22 @@ call_aerospike_nif(SyncCmd, AsyncCmd) ->
                     % Request is accepted for processing
                     receive
                         {ok, Response} -> {ok, Response};
+                        {error, {connection_pool_exhausted, ErrorMessage}} ->
+                            % Specific handling for connection pool exhaustion
+                            % Could implement retry logic, backpressure, etc.
+                            {error, ErrorMessage};
                         {error, {ErrorCode, ErrorMessage}} ->
-                            io:format("Got error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+                            io:format("Got unknown error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
                             {error, ErrorMessage}
                     after TimeToWait -> {error, <<"timeout">>}
                     end;
-                {error, {connection_pool_exhausted, Message}} ->
-                    % Specific handling for connection pool exhaustion
-                    % Could implement retry logic, backpressure, etc.
-                    {error, Message};
                 {error, {ErrorCode, ErrorMessage}} ->
                     % Handle other types of errors
-                    io:format("Got error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+                    io:format("Got unknown error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
                     {error, ErrorMessage}
             end;
         _ ->
-            io:format("Doing SYNC ...~n", []),
+            %io:format("Doing SYNC ...~n", []),
             SyncCmd()
     end.
 

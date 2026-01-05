@@ -2,10 +2,9 @@
 
 -export([
     dima_init/0,
-    dima_insert/0,
     dima_quick_test/0,
     dima_test/0,
-    dima_stress_test/3,
+    dima_stress_test/2,
    sp_insert/9,
    sp_insert/8,
    pool_insert/8,
@@ -49,10 +48,6 @@ dima_init() ->
     io:format("aspike_nif:host_add: ~p~n", [aspike_nif:host_add()]),
     io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]).
 
-dima_insert() ->
-    InsertRes = aspike_nif:cdt_put(<<"test">>, <<"rtb_setname">>, <<"aaa11">>, [{<<"fcap_map">>, [<<"campaign1">>, <<"campaign1_value">>, 123, <<"campaign2">>, <<"campaign2_value">>, 456]}], 300),
-    io:format("cdt_put result: ~p~n", [InsertRes]).
-
 dima_quick_test() ->
     dima_init(),
     Namespace = <<"test">>,
@@ -68,55 +63,207 @@ dima_quick_test() ->
 
 dima_test() ->
     dima_init(),
-    dima_stress_test(1, 1000, 0).
+    register(test_runner, self()),
+    register(collector, spawn_link(fun() -> dima_collector_start() end)),
 
-dima_stress_test (NProc, AmountOfInserts, Sleep) ->
+    TestName = "local sync cdt_put 10k",
+    AmountOfRequests = 10_000,
+
+    %dima_test_loop(TestName, AmountOfRequests, [10]).
+    dima_test_loop(TestName, AmountOfRequests, [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300]).
+
+dima_test_loop(TestName, _, []) ->
+    collector ! send_stats,
+    receive
+        {ok, Stats} ->
+            io:format("~nStats: ~p~n~n", [Stats]),
+            ChartSeries = maps:get(chart_series, Stats),
+            ModeAtom = aspike_nif:get_api_mode(nothing),
+            SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
+            JSON = lists:join("", [
+                "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
+                lists:join(", ", lists:map(fun(Data) ->
+                    {AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet} = Data,
+                    io_lib:format("{\"clients\": ~p, \"amountOfOps\": ~p, \"min\": ~p, \"max\": ~p, \"avg\": ~p, \"done\": ~p, \"failed\": ~p}", [AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet])
+                   end, SeriesOfThisMode)),
+                "]}"
+            ]),
+            io:format("JSON: ~s~n", [JSON]),
+            FileName = string:replace(TestName, " ", "_", all) ++ ".json",
+            {ok, FileDesc} = file:open(FileName, [write]),
+            file:write(FileDesc, JSON),
+            file:close(FileDesc),
+            io:format("Saved results to file: ~s~n", [FileName])
+    end;
+
+dima_test_loop(TestName, AmountOfRequests, [AmountOfClients | Tail]) ->
+    collector ! {test_starts, AmountOfClients},
+    receive
+        collector_ack -> ok
+    end,
+    dima_stress_test(AmountOfClients, AmountOfRequests),
+    receive
+        collection_done -> ok
+    end,
+    dima_test_loop(TestName, AmountOfRequests, Tail).
+
+dima_collector_start() ->
+    dima_collector_reset_stats(),
+    dima_collector_loop().
+
+dima_collector_reset_stats() ->
+    erlang:put(collector_stats, #{
+        status => done,
+        results_received => 0,
+        results_expected => 0,
+        by_clients => #{},
+        chart_series => #{
+            async => [],
+            sync => []
+        }
+    }).
+
+dima_collector_loop() ->
+    receive
+        {test_starts, ResultsExpected} ->
+            Stats = erlang:get(collector_stats),
+            erlang:put(collector_stats, maps:merge(Stats, #{
+                results_expected => ResultsExpected,
+                results_received => 0,
+                status => collecting
+            })),
+            test_runner ! collector_ack;
+        {load_finished, Data} ->
+            {Version, Results} = Data,
+            case Version of
+                1 ->
+                    {ClientId, AmountOfOps, OpsDone, ErrorsMet, TimePerOp} = Results,
+                    Stats = erlang:get(collector_stats),
+                    UpdatedStats = maps:merge(Stats, #{
+                        results_received => maps:get(results_received, Stats) + 1,
+                        by_clients => maps:merge(maps:get(by_clients, Stats), #{
+                            ClientId => #{
+                                opsAmount => AmountOfOps,
+                                opsDone => OpsDone,
+                                errorsMet => ErrorsMet,
+                                timePerOp => TimePerOp
+                            }
+                        })
+                    }),
+                    erlang:put(collector_stats, UpdatedStats),
+                    io:format("Result from child ~p: ops done: ~p, errors met: ~p, avg time per operaion : ~p µs ~n", [ClientId, OpsDone, ErrorsMet, TimePerOp]);
+                _ ->
+                    io:format("Collector: Received unknown version from a message: ~p~n", [Version])
+            end;
+        send_stats ->
+            test_runner ! {ok, erlang:get(collector_stats)}
+    end,
+
+    CurrentStats = erlang:get(collector_stats),
+    Status = maps:get(status, CurrentStats),
+    Received = maps:get(results_received, CurrentStats),
+    Expected = maps:get(results_expected, CurrentStats),
+    Remaining = Expected - Received,
+    case {Status, Remaining} of
+        {collecting, 0} ->
+            io:format("All clients have finished~n", []),
+            dima_collector_process_results(CurrentStats);
+        _ ->
+            ok
+    end,
+    dima_collector_loop().
+
+dima_collector_process_results(Stats) ->
+    AmountOfClients = maps:get(results_received, Stats),
+    ByClients = maps:get(by_clients, Stats),
+    ClientIds = maps:keys(ByClients),
+    {Min, Max, Total, OpsPerClient, OpsDone, ErrorsMet} = lists:foldl(fun(ClientId, Acc) ->
+        ClientData = maps:get(ClientId, ByClients),
+        TimePerOp = maps:get(timePerOp, ClientData),
+        OpsPerClient = maps:get(opsAmount, ClientData),
+        OpsDone = maps:get(opsDone, ClientData),
+        ErrorsMet = maps:get(errorsMet, ClientData),
+        {Min, Max, TotalTime, MaxOpsPerClient, TotalOpsDone, TotalErrorsMet} = Acc,
+        {
+            % minimum time per operation
+            min(Min, TimePerOp),
+            % maximum time per operation
+            max(Max, TimePerOp),
+            % average time per operation
+            TotalTime + TimePerOp,
+            % max amount of operations performed by client, which
+            % actually is the same for every client, but still, we use
+            % max function just in case of human error
+            max(MaxOpsPerClient, OpsPerClient),
+            % total amount of successful operations
+            TotalOpsDone + OpsDone,
+            % total amount of failed operations
+            TotalErrorsMet + ErrorsMet
+        }
+    end, {1_000_000_000, -1, 0, 0, 0, 0}, ClientIds),
+    Avg = Total / erlang:length(ClientIds),
+    io:format("Amount of parallel clients: ~p~n", [AmountOfClients]),
+    io:format("Amount of operations per client: ~p~n", [OpsPerClient]),
+    io:format("Min: ~p µs, Max: ~p µs, Avg: ~p µs~n", [Min, Max, Avg]),
+    io:format("Total successful ops: ~p, Total failed ops: ~p~n", [OpsDone, ErrorsMet]),
+
+    Stats = erlang:get(collector_stats),
+    ChartSeries = maps:get(chart_series, Stats),
+    ModeAtom = aspike_nif:get_api_mode(nothing),
+    SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
+    erlang:put(collector_stats, maps:merge(Stats, #{
+        status => done,
+        %by_clients => #{},
+        chart_series => maps:merge(ChartSeries, #{
+            ModeAtom => lists:append(SeriesOfThisMode, [{AmountOfClients, OpsPerClient, Min, Max, Avg, OpsDone, ErrorsMet}])
+        })
+    })),
+    test_runner ! collection_done.
+
+dima_stress_test (AmountOfClients, AmountOfOpsToDo) ->
     Namespace = <<"test">>,
     SetName = <<"rtb-gateway-fcap-users">>,
 
     ActionFunc = fun(Counter) ->
         Key = integer_to_binary(Counter),
         Bins = [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}],
-        TTL = 3600,
+        TTL = 60,
         aspike_nif:cdt_put(Namespace, SetName, Key, Bins, TTL)
     end,
 
+    io:format("Starting ~p clients ...~n", [AmountOfClients]),
     lists:map(fun(ProcNumber) ->
         spawn(fun() ->
             Counter = 1_000_000_000_000 * ProcNumber,
             ProcName = integer_to_list(ProcNumber),
             StartTime = erlang:system_time(microsecond),
-            Results = dima_stress_test_loop(ProcName, ActionFunc, AmountOfInserts, Counter, Sleep, 0, 0),
+            Results = dima_stress_test_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
             EndTime = erlang:system_time(microsecond),
-            InsertTime = EndTime - StartTime,
-            TimePerInsert = (EndTime - StartTime) div AmountOfInserts,
+            TimePerInsert = (EndTime - StartTime) div AmountOfOpsToDo,
             { OpsDone, ErrorsMet } = Results,
-            io:format("Result from child ~p: ops done: ~p, errors met: ~p, total time: ~p µs, avg time per insert : ~p µs ~n", [ProcNumber, OpsDone, ErrorsMet, InsertTime, TimePerInsert])
+            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerInsert}}}
         end)
-    end, lists:seq(1, NProc)).
+    end, lists:seq(1, AmountOfClients)).
 
-dima_stress_test_loop (_, _, 0, _, _, Oks, Errs) -> {Oks, Errs};
+dima_stress_test_loop (_, _, 0, _, Oks, Errs) -> {Oks, Errs};
 
-dima_stress_test_loop (ProcName, ActionFunc, AmountOfInserts, Counter, Sleep, Oks, Errs) ->
-    case AmountOfInserts rem 10000 of
-        0 -> io:format("~s: writes left to do: ~p ~n", [ProcName, AmountOfInserts]);
-        _ -> ok
-    end,
+dima_stress_test_loop (ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Errs) ->
+%%    case AmountOfOpsToDo rem 10000 of
+%%        0 -> io:format("~s: writes left to do: ~p ~n", [ProcName, AmountOfOpsToDo]);
+%%        _ -> ok
+%%    end,
 
     Result = ActionFunc(Counter),
 
     {OpsDone, ErrorsMet} = case Result of
-        {ok, _} -> {Oks + 1, Errs};
-        {error, ErrorMessage} ->
-            io:format("~s: got error: ~s~n", [ProcName, ErrorMessage]),
+        {ok, _} ->
+            {Oks + 1, Errs};
+        {error, _ErrorMessage} ->
+            %io:format("~s: got error: ~s~n", [ProcName, ErrorMessage]),
             {Oks, Errs + 1}
     end,
 
-    case Sleep of
-        0 -> ok;
-        _ -> timer:sleep(rand:uniform(Sleep))
-    end,
-    dima_stress_test_loop(ProcName, ActionFunc, AmountOfInserts - 1, Counter + 1, Sleep, OpsDone, ErrorsMet).
+    dima_stress_test_loop(ProcName, ActionFunc, AmountOfOpsToDo - 1, Counter + 1, OpsDone, ErrorsMet).
 
 % aspike_nif:cdt_put(<<"test">>, <<"someSet">>, <<"keyName">>, [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}], 10).
 % aspike_nif:cdt_get(<<"test">>, <<"someSet">>, <<"keyName">>).

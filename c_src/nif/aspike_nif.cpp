@@ -60,9 +60,12 @@ ERL_NIF_TERM get_erl_ok () { return erl_ok; }
 
 static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
-    // TODO: find out the best value of this variable.
-    config.async_max_conns_per_node = 200;
     as_config_init(&config);
+
+    // now, set the values we'd like to have
+    // TODO: find out the best value of this variable.
+    config.async_max_conns_per_node = 300;
+
     aerospike_init(&as, &config);
     erl_error = enif_make_atom(env, "error");
     erl_ok = enif_make_atom(env, "ok");
