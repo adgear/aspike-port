@@ -64,7 +64,7 @@ static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 
     // now, set the values we'd like to have
     // TODO: find out the best value of this variable.
-    config.async_max_conns_per_node = 300;
+    config.async_max_conns_per_node = 100;
 
     aerospike_init(&as, &config);
     erl_error = enif_make_atom(env, "error");
@@ -107,8 +107,8 @@ static ERL_NIF_TERM aspike_nif_connect_sync(ErlNifEnv* env, int argc, const ERL_
 }
 
 #define NIF_DIRTY_FUN(A, B, C) {A, B, C, ERL_DIRTY_JOB_IO_BOUND}
-
 static ErlNifFunc nif_funcs[] = {
+
     {"as_init", 0, aspike_nif_as_init_sync},
     {"nif_host_add", 2, aspike_nif_host_add_sync},
     {"host_clear", 0, aspike_nif_host_clear_sync},

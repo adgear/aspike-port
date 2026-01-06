@@ -15,6 +15,8 @@ fi
 
 echo "Found Erlang process PID: $ERL_PID"
 
+echo 0 | sudo tee /proc/sys/kernel/sched_rt_runtime_us
+
 # Create GDB commands file
 cat > /tmp/gdb_commands << EOF
 # Set non-stop mode BEFORE attaching (this is the key!)
@@ -66,7 +68,7 @@ set pagination off
 #break cdt_put_sync
 #break cdt_put_async
 # Optional breakpoints (comment out if they don't work)
-#break async_methods.cpp:66
+#break async_methods.cpp:74
 #break async_methods.cpp:289
 
 # Continue execution

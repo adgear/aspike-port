@@ -49,6 +49,65 @@
             margin-bottom: 20px;
         }
 
+        .chart-content {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .chart-plot {
+            flex: 2;
+            min-width: 0;
+        }
+
+        .chart-data-table {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+            background-color: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 4px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+
+        .data-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .data-table td {
+            vertical-align: middle;
+        }
+
+        .sync-value {
+            color: #2E86AB;
+            font-weight: 500;
+        }
+
+        .async-value {
+            color: #A23B72;
+            font-weight: 500;
+        }
+
+        .table-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+            text-align: center;
+        }
+
         .loading {
             text-align: center;
             color: #666;
@@ -267,7 +326,7 @@
                 },
                 yAxis: {
                     title: {
-                        text: 'Execution Time (milliseconds)',
+                        text: 'Execution Time (microseconds)',
                         style: {
                             fontSize: '14px',
                             color: '#333333'
@@ -278,26 +337,7 @@
                     gridLineColor: '#e0e0e0'
                 },
                 tooltip: {
-                    shared: true,
-                    stickOnContact: true,
-                    backgroundColor: '#ffffff',
-                    borderColor: '#333333',
-                    borderRadius: 8,
-                    shadow: true,
-                    style: {
-                        fontSize: '12px'
-                    },
-                    positioner: function (labelWidth, labelHeight, point) {
-                        const chart = this.chart;
-                        const plotLeft = chart.plotLeft;
-                        const plotTop = chart.plotTop;
-
-                        // Position tooltip at top left of the chart plot area
-                        return {
-                            x: plotLeft + 10,
-                            y: plotTop + 10
-                        };
-                    }
+                    enabled: false
                 },
                 plotOptions: {
                     series: {
@@ -328,6 +368,70 @@
             });
         }
 
+        // Function to format numbers with commas
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+
+        // Function to create data table
+        function createDataTable(containerId, syncData, asyncData) {
+            const tableContainer = document.getElementById(containerId);
+
+            let tableHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>#Clients</th>
+                            <th>Min (μs)</th>
+                            <th>Avg (μs)</th>
+                            <th>Max (μs)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            // Combine data from both sync and async
+            syncData.data.forEach((syncPoint, index) => {
+                const clients = syncData.categories[index];
+                const syncMin = formatNumber(syncPoint[0]);
+                const syncAvg = formatNumber(syncPoint[1]);
+                const syncMax = formatNumber(syncPoint[2]);
+
+                let minCell, avgCell, maxCell;
+
+                if (asyncData && asyncData.data[index]) {
+                    const asyncPoint = asyncData.data[index];
+                    const asyncMin = formatNumber(asyncPoint[0]);
+                    const asyncAvg = formatNumber(asyncPoint[1]);
+                    const asyncMax = formatNumber(asyncPoint[2]);
+
+                    minCell = `<span class="async-value">A: ${asyncMin}</span><br><span class="sync-value">S: ${syncMin}</span>`;
+                    avgCell = `<span class="async-value">A: ${asyncAvg}</span><br><span class="sync-value">S: ${syncAvg}</span>`;
+                    maxCell = `<span class="async-value">A: ${asyncMax}</span><br><span class="sync-value">S: ${syncMax}</span>`;
+                } else {
+                    minCell = `<span class="sync-value">S: ${syncMin}</span>`;
+                    avgCell = `<span class="sync-value">S: ${syncAvg}</span>`;
+                    maxCell = `<span class="sync-value">S: ${syncMax}</span>`;
+                }
+
+                tableHTML += `
+                    <tr>
+                        <td><strong>${formatNumber(clients)}</strong></td>
+                        <td>${minCell}</td>
+                        <td>${avgCell}</td>
+                        <td>${maxCell}</td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += `
+                    </tbody>
+                </table>
+            `;
+
+            tableContainer.innerHTML = tableHTML;
+        }
+
         // Function to create HTML for a chart section
         function createChartSection(operationKey, operationConfig, environment) {
             const sectionId = `${operationKey}-${environment}`;
@@ -341,7 +445,15 @@
                     <div class="zoom-instructions">
                         💡 Click and drag to zoom in • Double-click to reset zoom • Hold Shift and drag to pan when zoomed
                     </div>
-                    <div id="${chartId}" class="chart-container"></div>
+                    <div class="chart-content">
+                        <div class="chart-plot">
+                            <div id="${chartId}" class="chart-container"></div>
+                        </div>
+                        <div class="chart-data-table">
+                            <div class="table-title">Performance Data</div>
+                            <div id="${chartId}-table"></div>
+                        </div>
+                    </div>
                     <div class="chart-description">
                         ${description}
                     </div>
@@ -391,12 +503,14 @@
                             ? transformData(operationConfig.data[environment].async)
                             : null;
 
-                        // Create chart
+                        // Create chart and table
                         if (asyncTransformed) {
                             createChart(chartId, title, syncTransformed, asyncTransformed);
+                            createDataTable(chartId + '-table', syncTransformed, asyncTransformed);
                         } else {
                             // If no async data, create sync-only chart
                             createSyncOnlyChart(chartId, title, syncTransformed);
+                            createDataTable(chartId + '-table', syncTransformed, null);
                         }
                     }
                 });
@@ -472,7 +586,7 @@
                 },
                 yAxis: {
                     title: {
-                        text: 'Execution Time (milliseconds)',
+                        text: 'Execution Time (microseconds)',
                         style: {
                             fontSize: '14px',
                             color: '#333333'
@@ -483,25 +597,7 @@
                     gridLineColor: '#e0e0e0'
                 },
                 tooltip: {
-                    shared: true,
-                    stickOnContact: true,
-                    backgroundColor: '#ffffff',
-                    borderColor: '#333333',
-                    borderRadius: 8,
-                    shadow: true,
-                    style: {
-                        fontSize: '12px'
-                    },
-                    positioner: function (labelWidth, labelHeight, point) {
-                        const chart = this.chart;
-                        const plotLeft = chart.plotLeft;
-                        const plotTop = chart.plotTop;
-
-                        return {
-                            x: plotLeft + 10,
-                            y: plotTop + 10
-                        };
-                    }
+                    enabled: false
                 },
                 plotOptions: {
                     series: {

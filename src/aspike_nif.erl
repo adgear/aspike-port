@@ -170,7 +170,7 @@ connect(_, _) ->
     not_loaded(?LINE).
 
 get_api_mode(_Method) ->
-    DoAsyncApi = persistent_term:get(aspike_async_api, false),
+    DoAsyncApi = persistent_term:get(aspike_async_api, true),
     case DoAsyncApi of
         true -> async;
         _ -> sync
@@ -270,7 +270,8 @@ binary_put(_Namespace, _Set, _Key, _BinList, _TTL) ->
 % 'wt' key is added by NIF implementation of cdt_put() and basically a timestamp of write time (wt).
 % Policy is a tuple expanded as
 % {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}
-% timeouts should be given in milliseconds
+% timeouts and sleep time should be given in milliseconds
+% Note: SleepBetweenRetries is ignored by aerospike c-client in async mode
 cdt_put(Namespace, Set, RecordKeyName, BinList, TTL) ->
     cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, {0, 0, 30000, 1000}).
 -spec cdt_put(binary(), binary(), binary(), 

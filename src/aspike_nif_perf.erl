@@ -39,13 +39,13 @@
 -define(FCAP_BIN, <<"fcap_map">>).
 
 dima_init() ->
-    io:format("set host: ~p~n", [application:set_env(aspike_port, host, "127.0.0.1")]),
-    %io:format("set host: ~p~n", [application:set_env(aspike_port, host, "192.168.88.69")]),
-    io:format("set port: ~p~n", [application:set_env(aspike_port, port, 3000)]),
-    io:format("set user: ~p~n", [application:set_env(aspike_port, user, "")]),
-    io:format("set passwd: ~p~n", [application:set_env(aspike_port, psw, "")]),
-    io:format("aspike_nif:as_init: ~p~n", [aspike_nif:as_init()]),
-    io:format("aspike_nif:host_add: ~p~n", [aspike_nif:host_add()]),
+    application:set_env(aspike_port, host, "127.0.0.1"),
+    %application:set_env(aspike_port, host, "192.168.88.69"),
+    application:set_env(aspike_port, port, 3000),
+    application:set_env(aspike_port, user, ""),
+    application:set_env(aspike_port, psw, ""),
+    aspike_nif:as_init(),
+    aspike_nif:host_add(),
     io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]).
 
 dima_quick_test() ->
@@ -69,14 +69,14 @@ dima_test() ->
     TestName = "local sync cdt_put 10k",
     AmountOfRequests = 10_000,
 
-    %dima_test_loop(TestName, AmountOfRequests, [10]).
-    dima_test_loop(TestName, AmountOfRequests, [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300]).
+    dima_test_loop(TestName, AmountOfRequests, [101]).
+    %dima_test_loop(TestName, AmountOfRequests, [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300]).
 
 dima_test_loop(TestName, _, []) ->
     collector ! send_stats,
     receive
         {ok, Stats} ->
-            io:format("~nStats: ~p~n~n", [Stats]),
+            %io:format("~nStats: ~p~n~n", [Stats]),
             ChartSeries = maps:get(chart_series, Stats),
             ModeAtom = aspike_nif:get_api_mode(nothing),
             SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
@@ -150,8 +150,8 @@ dima_collector_loop() ->
                             }
                         })
                     }),
-                    erlang:put(collector_stats, UpdatedStats),
-                    io:format("Result from child ~p: ops done: ~p, errors met: ~p, avg time per operaion : ~p µs ~n", [ClientId, OpsDone, ErrorsMet, TimePerOp]);
+                    erlang:put(collector_stats, UpdatedStats);
+                    %io:format("Result from child ~p: ops done: ~p, errors met: ~p, avg time per operation : ~p µs ~n", [ClientId, OpsDone, ErrorsMet, TimePerOp]);
                 _ ->
                     io:format("Collector: Received unknown version from a message: ~p~n", [Version])
             end;
@@ -205,7 +205,8 @@ dima_collector_process_results(Stats) ->
     io:format("Amount of parallel clients: ~p~n", [AmountOfClients]),
     io:format("Amount of operations per client: ~p~n", [OpsPerClient]),
     io:format("Min: ~p µs, Max: ~p µs, Avg: ~p µs~n", [Min, Max, Avg]),
-    io:format("Total successful ops: ~p, Total failed ops: ~p~n", [OpsDone, ErrorsMet]),
+    PercentOfFailed = round((ErrorsMet / (OpsDone + OpsPerClient)) * 100),
+    io:format("Total successful ops: ~p, Total failed ops: ~p (~p % from total)~n", [OpsDone, ErrorsMet, PercentOfFailed]),
 
     Stats = erlang:get(collector_stats),
     ChartSeries = maps:get(chart_series, Stats),
@@ -228,10 +229,11 @@ dima_stress_test (AmountOfClients, AmountOfOpsToDo) ->
         Key = integer_to_binary(Counter),
         Bins = [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}],
         TTL = 60,
-        aspike_nif:cdt_put(Namespace, SetName, Key, Bins, TTL)
+        aspike_nif:cdt_put(Namespace, SetName, Key, Bins, TTL, {500, 0, 30000, 1000})
     end,
 
-    io:format("Starting ~p clients ...~n", [AmountOfClients]),
+    ModeAtom = aspike_nif:get_api_mode(nothing),
+    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
     lists:map(fun(ProcNumber) ->
         spawn(fun() ->
             Counter = 1_000_000_000_000 * ProcNumber,
