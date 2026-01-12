@@ -380,7 +380,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         if(ttl != 0){
             ops.ttl = ttl;
         } else {
-            ops.ttl = AS_RECORD_NO_CHANGE_TTL;  // -2: preserve existing record TTL
+            ops.ttl = AS_RECORD_NO_CHANGE_TTL;  // -2: keep existing record TTL when performing operations
         }
         uint opnum = 0;
         ErlNifBinary bin_key, bin_val;
