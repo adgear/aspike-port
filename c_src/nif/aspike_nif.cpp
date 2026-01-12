@@ -339,8 +339,10 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 	as_record_inita(&rec, length);
     if(ttl != 0){
         rec.ttl = ttl;
+    } else {
+        rec.ttl = AS_RECORD_NO_CHANGE_TTL;  // -2: preserve existing record TTL
     }
-        
+
     std::vector<as_cdt_ctx*> ctx_vec; 
     as_operations ops;
     as_map_policy put_mode;
@@ -378,7 +380,7 @@ static ERL_NIF_TERM cdt_put(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         if(ttl != 0){
             ops.ttl = ttl;
         } else {
-            ops.ttl = -2;
+            ops.ttl = AS_RECORD_NO_CHANGE_TTL;  // -2: keep existing record TTL when performing operations
         }
         uint opnum = 0;
         ErlNifBinary bin_key, bin_val;
