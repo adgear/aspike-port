@@ -6,6 +6,12 @@ two client libraries:
 * libev
 * aerospike-client-c-libev
 
+After installation, use make to run rebar3:
+
+```base
+$ make
+```
+
 ### For Ubuntu/Debian:
 ```bash
 wget https://download.aerospike.com/artifacts/aerospike-client-c/6.5.1/aerospike-client-c-libev_6.5.1_debian11_x86_64.tgz
@@ -20,10 +26,23 @@ $ pacman -S libev
 $ pacaur -S aerospike-client-c-libev
 ```
 
-after installation, run rebar3:
+### For OS X:
 
+Download and install the aerospike c client using libev from
+https://aerospike.com/download/?software=client-c .
+
+You will also likely need libopenssl.
+
+For libev, you can just use homebrew:
 ```bash
-$ make
+$ brew install libev
+$ brew install openssl
+```
+
+Since homebrew does not put the libraries in the usual search path, you should add both libev and libssl to the linker flags. Futher, OS X by default does not want to do dynamic linking. Depending on what you have done before, you may only need part of the below:
+
+```
+$ export LDFLAGS="$LDFLAGS -rpath /usr/local/lib -undefined dynamic_lookup -L$(brew --prefix libev)/lib -L$(brew --prefix libopenssl@3)"
 ```
 
 ## Run perf tests
