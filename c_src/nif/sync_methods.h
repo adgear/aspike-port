@@ -1,9 +1,6 @@
 #ifndef SYNC_METHODS_H
 #define SYNC_METHODS_H
 
-#include <erl_nif.h>
-#include <aerospike/as_record.h>
-
 ERL_NIF_TERM aspike_nif_as_init_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM aspike_nif_host_add_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM aspike_nif_host_clear_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
@@ -32,6 +29,5 @@ ERL_NIF_TERM aspike_nif_node_info_sync(ErlNifEnv* env, int argc, const ERL_NIF_T
 ERL_NIF_TERM aspike_nif_help_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM aspike_nif_host_info_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
 ERL_NIF_TERM aspike_nif_a_key_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]);
-
 
 #endif // SYNC_METHODS_H

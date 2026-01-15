@@ -33,26 +33,27 @@
 #include <vector>
 
 #include "aspike_nif.h"
-#include "sync_methods.h"
+#include "common_methods.h"
+#include "async_methods.h"
 
-// Async callback structure for cdt_put operations
-struct cdt_put_callback_data {
+// Async callback structure for async operations
+struct callback_data {
     ErlNifPid caller_pid;  // Erlang process to send result to
     ErlNifEnv* msg_env;    // Environment for creating response message
-    std::vector<as_cdt_ctx*> contexts;
+    std::vector<as_cdt_ctx*> cdt_contexts;
 
     // Constructor to properly initialize
-    cdt_put_callback_data(ErlNifEnv* env) {
+    callback_data(ErlNifEnv* env) {
         msg_env = enif_alloc_env();
     }
 
     // Destructor for cleanup
-    ~cdt_put_callback_data() {
+    ~callback_data() {
         if (msg_env) {
             enif_free_env(msg_env);
         }
-        for (auto ctx : contexts) {
-            as_cdt_ctx_destroy(ctx);
+        for (auto cdt_ctx : cdt_contexts) {
+            as_cdt_ctx_destroy(cdt_ctx);
         }
     }
 };
@@ -63,7 +64,7 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM result_msg;
 
-    cdt_put_callback_data* cb_data = (cdt_put_callback_data*)udata;
+    callback_data* cb_data = (callback_data*)udata;
 
     if (err) {
         ERL_NIF_TERM error_msg;
@@ -88,7 +89,7 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_error, error_tuple);
     } else {
-        ERL_NIF_TERM response = enif_make_string(cb_data->msg_env, "put", ERL_NIF_UTF8);
+        ERL_NIF_TERM response = enif_make_string(cb_data->msg_env, "done", ERL_NIF_UTF8);
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_ok, response);
     }
 
@@ -147,20 +148,25 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
         return enif_make_badarg(env);
     }
 
-    const ERL_NIF_TERM* cdt_put_policy = NULL;
+    const ERL_NIF_TERM* erl_policy = NULL;
     int policy_length;
     long max_retries = 0;
-    long sleep_between_retries = 0;
-    long socket_timeout = 30000;
-    long total_timeout = 1000;
-    int policyReadRC = enif_get_tuple(env, argv[5], &policy_length, &cdt_put_policy);
+    long socket_timeout = 0;
+    long total_timeout = 0;
+    int policyReadRC = enif_get_tuple(env, argv[5], &policy_length, &erl_policy);
     if (!policyReadRC || policy_length != 4) {
         return enif_make_badarg(env);
     }
-    enif_get_long(env, cdt_put_policy[0], &max_retries);
-    enif_get_long(env, cdt_put_policy[1], &sleep_between_retries);
-    enif_get_long(env, cdt_put_policy[2], &socket_timeout);
-    enif_get_long(env, cdt_put_policy[3], &total_timeout);
+    // note: sleep_between_retries is not used in async operations by c-client
+    enif_get_long(env, erl_policy[0], &max_retries);
+    enif_get_long(env, erl_policy[2], &socket_timeout);
+    enif_get_long(env, erl_policy[3], &total_timeout);
+    as_policy_operate policy;
+    as_policy_operate_init(&policy);
+    policy.ttl = ttl;
+    policy.base.max_retries = max_retries;
+    policy.base.socket_timeout = socket_timeout;
+    policy.base.total_timeout = total_timeout;
 
     // We need to know upfront how many operations we are going to send to
     // aerospike, and we can get that amount by walking thr provided bins
@@ -209,7 +215,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
     // Allocate callback data with proper initialization on heap
-    cdt_put_callback_data* cb_data = new cdt_put_callback_data(env);
+    callback_data* cb_data = new callback_data(env);
 
     // Get caller PID and create callback data
     if (!enif_self(env, &cb_data->caller_pid)) {
@@ -279,7 +285,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 // this map
                 as_cdt_ctx* context = as_cdt_ctx_create(1);
                 // save context for later removal
-                cb_data->contexts.push_back(context);
+                cb_data->cdt_contexts.push_back(context);
                 // getting first level key name
                 ErlNifBinary erl_key_name;
                 if (enif_inspect_binary(env, data_head, &erl_key_name)) {
@@ -317,7 +323,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     }
                     as_bytes* value_data = as_bytes_new_wrap(copy_on_heap, erl_value_data.size, true);
                     // next line creates a key 'value' in the map we created above in 'opnum == 1'
-                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)value_data);
+                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)value_data);
                 }
                 opnum++;
             } else if (opnum == 2) {
@@ -329,7 +335,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     as_string* key_name = as_string_new_strdup("ttl");
                     as_integer* ttl_value = as_integer_new(i64);
                     // next line creates a key 'ttl' in the map we created above in 'opnum == 1'
-                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)ttl_value);
+                    as_operations_map_put(&operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)ttl_value);
                 }
 
                 // let's create a 'wt' key on second-level map
@@ -339,7 +345,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 long timestamp = std::chrono::duration_cast<std::chrono::seconds>(now).count();
                 as_integer* wt_value = as_integer_new(timestamp);
                 // next line creates a key 'wt' in the map we created above in 'opnum == 1'
-                as_operations_map_put(&operations, bin_name.c_str(), cb_data->contexts.back(), &put_mode, (as_val*)key_name, (as_val*)wt_value);
+                as_operations_map_put(&operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)wt_value);
 
                 opnum = 0;
             } else {
@@ -351,19 +357,10 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
         bins = bins_tail;
     }
 
-    // Set up async policy
-    as_policy_operate policy;
-    as_policy_operate_init(&policy);
-    policy.ttl = ttl;
-    policy.base.max_retries = max_retries;
-    policy.base.sleep_between_retries = sleep_between_retries;
-    policy.base.socket_timeout = socket_timeout;
-    policy.base.total_timeout = total_timeout;
-
-    ERL_NIF_TERM return_data;
     as_error err;
     as_status status = aerospike_key_operate_async(as, &err, &policy, &record_key, &operations, cdt_put_async_callback, cb_data, NULL, NULL);
 
+    ERL_NIF_TERM return_data;
     if (status != AEROSPIKE_OK) {
         // Failed to initiate async operation
 
@@ -388,6 +385,140 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
     as_key_destroy(&record_key);
     as_operations_destroy(&operations);
+
+    return return_data;
+}
+
+// Callback function for async cdt_get operation
+static void cdt_get_async_callback(as_error* err, as_record* record, void* udata, as_event_loop* event_loop) {
+    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = get_erl_error();
+    ERL_NIF_TERM result_msg;
+
+    callback_data* cb_data = (callback_data*)udata;
+
+    if (err) {
+        ERL_NIF_TERM error_msg;
+        ERL_NIF_TERM error_code;
+
+        if (err->code == AEROSPIKE_ERR_NO_MORE_CONNECTIONS) {
+            // Special handling for connection pool exhaustion
+            error_code = enif_make_atom(cb_data->msg_env, "connection_pool_exhausted");
+            error_msg = enif_make_string(cb_data->msg_env, "connection_pool_exhausted", ERL_NIF_UTF8);
+        } else {
+            // Regular error message
+            char int_buffer[32];
+            snprintf(int_buffer, sizeof(int_buffer), "%d", err->code);
+            error_code = enif_make_atom(cb_data->msg_env, int_buffer);
+            if (strlen(err->message) != 0) {
+                error_msg = enif_make_string(cb_data->msg_env, err->message, ERL_NIF_UTF8);
+            } else {
+                error_msg = enif_make_string(cb_data->msg_env, "Unknown error occurred", ERL_NIF_UTF8);
+            }
+        }
+        ERL_NIF_TERM error_tuple = enif_make_tuple2(cb_data->msg_env, error_code, error_msg);
+
+        result_msg = enif_make_tuple2(cb_data->msg_env, erl_error, error_tuple);
+    } else {
+        ERL_NIF_TERM response = aspike_dump_cdt_records(cb_data->msg_env, record);
+        result_msg = enif_make_tuple2(cb_data->msg_env, erl_ok, response);
+    }
+
+    // Send message to calling Erlang process
+    enif_send(NULL, &cb_data->caller_pid, cb_data->msg_env, result_msg);
+
+    // Clean up callback data
+    delete cb_data;
+}
+
+ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    static aerospike* as = get_aerospike();
+    bool is_aerospike_initialised = get_is_aerospike_initialised();
+    bool is_connected = get_is_connected();
+    ERL_NIF_TERM erl_error = get_erl_error();
+    ERL_NIF_TERM erl_ok = get_erl_ok();
+
+    ErlNifBinary erl_namespace;
+    if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
+        return enif_make_badarg(env);
+    }
+    std::string name_space;
+    name_space.assign((const char*)erl_namespace.data, erl_namespace.size);
+
+    ErlNifBinary erl_set_name;
+    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+        return enif_make_badarg(env);
+    }
+    std::string set_name;
+    set_name.assign((const char*)erl_set_name.data, erl_set_name.size);
+
+    ErlNifBinary erl_primary_key;
+    if (!enif_inspect_binary(env, argv[2], &erl_primary_key)) {
+        return enif_make_badarg(env);
+    }
+    std::string record_primary_key;
+    record_primary_key.assign((const char*)erl_primary_key.data, erl_primary_key.size);
+
+    const ERL_NIF_TERM* erl_policy = NULL;
+    int policy_length;
+    long max_retries = 0;
+    long socket_timeout = 0;
+    long total_timeout = 0;
+    int policyReadRC = enif_get_tuple(env, argv[3], &policy_length, &erl_policy);
+    if (!policyReadRC || policy_length != 4) {
+        return enif_make_badarg(env);
+    }
+    // note: sleep_between_retries is not used in async operations by c-client
+    enif_get_long(env, erl_policy[0], &max_retries);
+    enif_get_long(env, erl_policy[2], &socket_timeout);
+    enif_get_long(env, erl_policy[3], &total_timeout);
+    as_policy_read policy;
+    as_policy_read_init(&policy);
+    policy.base.max_retries = max_retries;
+    policy.base.socket_timeout = socket_timeout;
+    policy.base.total_timeout = total_timeout;
+
+    CHECK_ALL
+
+    // Allocate callback data with proper initialization on heap
+    callback_data* cb_data = new callback_data(env);
+
+    // Get caller PID and create callback data
+    if (!enif_self(env, &cb_data->caller_pid)) {
+        delete cb_data;
+        return enif_make_tuple2(env, erl_error, enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8));
+    }
+
+    as_key record_key;
+    as_key_init_str(&record_key, name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
+
+    as_error err;
+    as_status status = aerospike_key_get_async(as, &err, &policy, &record_key, cdt_get_async_callback, cb_data, NULL, NULL);
+    
+    ERL_NIF_TERM return_data;
+    if (status != AEROSPIKE_OK) {
+        // Failed to initiate async operation
+
+        // Cleanup callback data
+        delete cb_data;
+
+        char int_buffer[32];
+        snprintf(int_buffer, sizeof(int_buffer), "%d", err.code);
+        ERL_NIF_TERM error_code = enif_make_atom(env, int_buffer);
+        ERL_NIF_TERM error_msg;
+        if (strlen(err.message) != 0) {
+            error_msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
+        } else {
+            error_msg = enif_make_string(env, "Unknown error occurred", ERL_NIF_UTF8);
+        }
+        ERL_NIF_TERM error_tuple = enif_make_tuple2(env, error_code, error_msg);
+
+        return_data = enif_make_tuple2(env, erl_error, error_tuple);
+    } else {
+        return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "in_progress"));
+    }
+
+    as_key_destroy(&record_key);
 
     return return_data;
 }

@@ -62,8 +62,6 @@ static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
     as_config_init(&config);
 
-    // now, set the values we'd like to have
-    // TODO: find out the best value of this variable.
     config.async_max_conns_per_node = 100;
 
     aerospike_init(&as, &config);
@@ -117,7 +115,8 @@ static ErlNifFunc nif_funcs[] = {
 
     NIF_DIRTY_FUN("cdt_put_sync", 6, aspike_nif_cdt_put_sync),
     {"cdt_put_async", 6, aspike_nif_cdt_put_async},
-    NIF_DIRTY_FUN("cdt_get", 4, aspike_nif_cdt_get_sync),
+    NIF_DIRTY_FUN("cdt_get_sync", 4, aspike_nif_cdt_get_sync),
+    {"cdt_get_async", 4, aspike_nif_cdt_get_async},
     NIF_DIRTY_FUN("cdt_delete_by_keys", 5, aspike_nif_cdt_delete_by_keys_sync),
     NIF_DIRTY_FUN("cdt_delete_by_keys_batch", 4, aspike_nif_cdt_delete_by_keys_batch_sync),
     NIF_DIRTY_FUN("segment_tag_get", 4, aspike_nif_segment_tag_get_sync),

@@ -4,7 +4,7 @@
     dima_init/0,
     dima_quick_test/0,
     dima_test/0,
-    dima_stress_test/2,
+    dima_stress_test/3,
    sp_insert/9,
    sp_insert/8,
    pool_insert/8,
@@ -50,35 +50,76 @@ dima_init() ->
 
 dima_quick_test() ->
     dima_init(),
+    Mode = atom_to_list(aspike_nif:get_api_mode(default)),
+    io:format("Working in ~s mode with Aerospike server.~n", [Mode]),
     Namespace = <<"test">>,
     SetName = <<"rtb_setname">>,
     PrimaryKey = <<"user_defined_key_3">>,
-    InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, [
+    DataToInsert = [
         {<<"fcap_map_1">>, [<<"map_key_1_1">>, <<"map_value_1_1">>, 123, <<"map_key_1_2">>, <<"map_value_1_2">>, 456]},
         {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<"map_value_2_1">>, 345, <<"map_key_2_2">>, <<"map_value_2_2">>, 678]}
-    ], 300),
+    ],
+    InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, DataToInsert, 300),
     io:format("cdt_put result: ~p~n", [InsertRes]),
     ReadRes = aspike_nif:cdt_get(Namespace, SetName, PrimaryKey),
-    io:format("cdt_get result: ~p~n", [ReadRes]).
+    io:format("cdt_get result:~n~p~n", [ReadRes]),
+    io:format("This result should equal to:~n~p~n", [DataToInsert]).
 
 dima_test() ->
     dima_init(),
     register(test_runner, self()),
     register(collector, spawn_link(fun() -> dima_collector_start() end)),
 
-    TestName = "local sync cdt_put 10k",
+    TestNamePrefix = "local",
     AmountOfRequests = 10_000,
+    %Command = cdt_put,
+    Command = cdt_get,
 
-    dima_test_loop(TestName, AmountOfRequests, [101]).
-    %dima_test_loop(TestName, AmountOfRequests, [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300]).
+    Namespace = <<"test">>,
+    SetName = <<"test_set">>,
+    ActionFunc = case Command of
+        cdt_put ->
+            fun(Counter) ->
+                RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
+                MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value2 = <<<<"value2_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Bins = [{MapKey1, [Value1, Value2, Counter]}],
+                TTL = 60 * 60,
+                aspike_nif:cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, {500, 0, 30000, 1000})
+            end;
+        cdt_get ->
+            fun(Counter) ->
+                RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Result = aspike_nif:cdt_get(Namespace, SetName, RecordKeyName),
+                % now we do some validation
+                case Result of
+                    {error, _} -> Result;
+                    {ok, Data} ->
+                        MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                        Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                        Value2 = <<<<"value2_">>/binary, (integer_to_binary(Counter))/binary>>,
+                        case Data of
+                            [{MapKey1, [Value1, {Value2, _,_}]}] -> Result;
+                            _ -> {error, <<"cdt_get() doesn't match data put by cdt_put()">>}
+                        end
+                end
+            end
+        end,
 
-dima_test_loop(TestName, _, []) ->
+    ModeAtom = aspike_nif:get_api_mode(default),
+    TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfRequests),
+
+    %dima_test_loop(TestName, ActionFunc, AmountOfRequests, [300]).
+    dima_test_loop(TestName, ActionFunc, AmountOfRequests, [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300]).
+
+dima_test_loop(TestName, _, _, []) ->
     collector ! send_stats,
     receive
         {ok, Stats} ->
             %io:format("~nStats: ~p~n~n", [Stats]),
             ChartSeries = maps:get(chart_series, Stats),
-            ModeAtom = aspike_nif:get_api_mode(nothing),
+            ModeAtom = aspike_nif:get_api_mode(default),
             SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
             JSON = lists:join("", [
                 "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
@@ -96,16 +137,16 @@ dima_test_loop(TestName, _, []) ->
             io:format("Saved results to file: ~s~n", [FileName])
     end;
 
-dima_test_loop(TestName, AmountOfRequests, [AmountOfClients | Tail]) ->
+dima_test_loop(TestName, ActionFunc, AmountOfRequests, [AmountOfClients | Tail]) ->
     collector ! {test_starts, AmountOfClients},
     receive
         collector_ack -> ok
     end,
-    dima_stress_test(AmountOfClients, AmountOfRequests),
+    dima_stress_test(AmountOfClients, ActionFunc, AmountOfRequests),
     receive
         collection_done -> ok
     end,
-    dima_test_loop(TestName, AmountOfRequests, Tail).
+    dima_test_loop(TestName, ActionFunc, AmountOfRequests, Tail).
 
 dima_collector_start() ->
     dima_collector_reset_stats(),
@@ -210,7 +251,7 @@ dima_collector_process_results(Stats) ->
 
     Stats = erlang:get(collector_stats),
     ChartSeries = maps:get(chart_series, Stats),
-    ModeAtom = aspike_nif:get_api_mode(nothing),
+    ModeAtom = aspike_nif:get_api_mode(default),
     SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
     erlang:put(collector_stats, maps:merge(Stats, #{
         status => done,
@@ -221,22 +262,12 @@ dima_collector_process_results(Stats) ->
     })),
     test_runner ! collection_done.
 
-dima_stress_test (AmountOfClients, AmountOfOpsToDo) ->
-    Namespace = <<"test">>,
-    SetName = <<"rtb-gateway-fcap-users">>,
-
-    ActionFunc = fun(Counter) ->
-        Key = integer_to_binary(Counter),
-        Bins = [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}],
-        TTL = 60,
-        aspike_nif:cdt_put(Namespace, SetName, Key, Bins, TTL, {500, 0, 30000, 1000})
-    end,
-
-    ModeAtom = aspike_nif:get_api_mode(nothing),
+dima_stress_test (AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
+    ModeAtom = aspike_nif:get_api_mode(default),
     io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
     lists:map(fun(ProcNumber) ->
         spawn(fun() ->
-            Counter = 1_000_000_000_000 * ProcNumber,
+            Counter = AmountOfOpsToDo * ProcNumber,
             ProcName = integer_to_list(ProcNumber),
             StartTime = erlang:system_time(microsecond),
             Results = dima_stress_test_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
@@ -250,11 +281,6 @@ dima_stress_test (AmountOfClients, AmountOfOpsToDo) ->
 dima_stress_test_loop (_, _, 0, _, Oks, Errs) -> {Oks, Errs};
 
 dima_stress_test_loop (ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Errs) ->
-%%    case AmountOfOpsToDo rem 10000 of
-%%        0 -> io:format("~s: writes left to do: ~p ~n", [ProcName, AmountOfOpsToDo]);
-%%        _ -> ok
-%%    end,
-
     Result = ActionFunc(Counter),
 
     {OpsDone, ErrorsMet} = case Result of

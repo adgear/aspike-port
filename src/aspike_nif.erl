@@ -56,8 +56,6 @@
     binary_put/5,
     binary_remove/5,
     binary_get/3,
-    cdt_get/4,
-    cdt_get/3,
     cdt_expire/4,
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
@@ -65,6 +63,10 @@
     cdt_put/6,
     cdt_put_sync/6,
     cdt_put_async/6,
+    cdt_get/3,
+    cdt_get/4,
+    cdt_get_sync/4,
+    cdt_get_async/4,
     segment_tag_get/4
 ]).
 
@@ -92,12 +94,13 @@
     binary_put/5,
     binary_remove/5,
     binary_get/3,
-    cdt_get/4,
     cdt_expire/4,
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
     cdt_put_sync/6,
     cdt_put_async/6,
+    cdt_get_sync/4,
+    cdt_get_async/4,
     segment_tag_get/4
 ]).
 
@@ -106,6 +109,8 @@
 -on_load(init/0).
 
 -define(LIBNAME, ?MODULE).
+
+-define(ASPIKE_API_ASYNC_MODE, aspike_async_api).
 
 % -------------------------------------------------------------------------------
 
@@ -169,47 +174,55 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
-get_api_mode(_Method) ->
-    DoAsyncApi = persistent_term:get(aspike_async_api, true),
+-spec get_api_mode(atom()) -> atom().
+get_api_mode(OperationName) ->
+
+%%    case 'Elixir.Unleash':'enabled?'(<<"optedout_ctv_fcap">>) of
+%%        true ->
+%%            rtb_gateway_utils:make_tifa_hash(Ifa, Ua, Ip, Ipv6);
+%%        _ ->
+%%            undefined
+%%    end,
+
+    AsyncModeEnabledByDefault = true,
+    DoAsyncApi = persistent_term:get(?ASPIKE_API_ASYNC_MODE, AsyncModeEnabledByDefault),
     case DoAsyncApi of
-        true -> async;
+        true ->
+            case OperationName of
+                someOperationYouWantBeSync -> sync;
+                _ -> async
+            end;
         _ -> sync
     end.
 
-call_aerospike_nif(SyncCmd, AsyncCmd) ->
-    case get_api_mode(nothing) of
-        async ->
-            %io:format("Doing ASYNC ...~n", []),
-            % TODO: determine a value for TTL
-            TimeToWait = 1000, % in ms
-            Res = AsyncCmd(),
-            %io:format("Result from async launch: ~p~n", [Res]),
-            case Res of
-                {ok, put} ->
-                    % Operation has completed, probably there is just nothing to do, like
-                    % the bin list is empty
-                    {ok, put};
-                {ok, in_progress} ->
-                    % Request is accepted for processing
-                    receive
-                        {ok, Response} -> {ok, Response};
-                        {error, {connection_pool_exhausted, ErrorMessage}} ->
-                            % Specific handling for connection pool exhaustion
-                            % Could implement retry logic, backpressure, etc.
-                            {error, ErrorMessage};
-                        {error, {ErrorCode, ErrorMessage}} ->
-                            io:format("Got unknown error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
-                            {error, ErrorMessage}
-                    after TimeToWait -> {error, <<"timeout">>}
-                    end;
-                {error, {ErrorCode, ErrorMessage}} ->
-                    % Handle other types of errors
-                    io:format("Got unknown error from Aerospike: ErrorCode: ~p, ErrorMessage: ~s~n", [ErrorCode, ErrorMessage]),
+-spec call_aerospike_async_nif(function()) -> {ok, string()} | {error, string()}.
+call_aerospike_async_nif(AsyncCmd) ->
+    % TimeToWait has a temporary value and will be adjusted based on
+    % production environment, like what is p99 of the current time
+    % the async request takes
+    TimeToWait = 15, % in ms
+    Res = AsyncCmd(),
+    case Res of
+        {ok, in_progress} ->
+            % Request is accepted for processing
+            receive
+                {ok, Response} -> {ok, Response};
+                {error, {connection_pool_exhausted, ErrorMessage}} ->
+                    % Specific handling for connection pool exhaustion
+                    % Could implement retry logic, backpressure, etc.,
+                    % but for now we just return the error
+                    {error, ErrorMessage};
+                {error, {_ErrorCode, ErrorMessage}} ->
                     {error, ErrorMessage}
+            after TimeToWait -> {error, <<"timeout waiting for the response from aerospike">>}
             end;
-        _ ->
-            %io:format("Doing SYNC ...~n", []),
-            SyncCmd()
+        {ok, Response} ->
+            % Operation has completed. Probably it happened because there is nothing to do,
+            % like the data provided to nif method require no api call
+            {ok, Response};
+        {error, {_ErrorCode, ErrorMessage}} ->
+            % Handle other types of errors if necessary
+            {error, ErrorMessage}
     end.
 
 key_exists() ->
@@ -218,7 +231,7 @@ key_exists() ->
 key_exists(Key) ->
     key_exists(?DEFAULT_NAMESPACE, ?DEFAULT_SET, Key).
 
-% @doc Checks if Key exists in Namesplace Set
+% @doc Checks if Key exists in Namespace Set
 -spec key_exists(string(), string(), string()) -> {ok, string()} | {error, string()}.
 key_exists(Namespace, Set, Key) when is_list(Namespace), is_list(Set), is_list(Key) ->
     not_loaded(?LINE).
@@ -279,13 +292,35 @@ cdt_put(Namespace, Set, RecordKeyName, BinList, TTL) ->
         {integer(), integer(), integer(), integer()}) -> 
             {ok, string()} | {error, string()}.
 cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
-    SyncCmd = fun() -> cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy) end,
-    AsyncCmd = fun() -> cdt_put_async(Namespace, Set, RecordKeyName, BinList, TTL, Policy) end,
-    call_aerospike_nif(SyncCmd, AsyncCmd).
+    case get_api_mode(cdt_put) of
+        sync ->
+            cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy);
+        async ->
+            AsyncCmd = fun() -> cdt_put_async(Namespace, Set, RecordKeyName, BinList, TTL, Policy) end,
+            call_aerospike_async_nif(AsyncCmd)
+    end.
 
 cdt_put_sync(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
+    not_loaded(?LINE).
+
+cdt_get(Namespace, Set, RecordKeyName) ->
+    cdt_get(Namespace, Set, RecordKeyName, {0, 0, 30000, 1000}).
+% {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}  timeouts in milliseconds
+-spec cdt_get(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
+cdt_get(Namespace, Set, RecordKeyName, Policy) when is_binary(Namespace), is_binary(Set), is_binary(RecordKeyName) ->
+    case get_api_mode(cdt_get) of
+        sync ->
+            cdt_get_sync(Namespace, Set, RecordKeyName, Policy);
+        async ->
+            AsyncCmd = fun() -> cdt_get_async(Namespace, Set, RecordKeyName, Policy) end,
+            call_aerospike_async_nif(AsyncCmd)
+    end.
+
+cdt_get_sync(_Namespace, _Set, _RecordKeyName, _Policy) ->
+    not_loaded(?LINE).
+cdt_get_async(_Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
 
 -spec binary_remove(binary(), binary(), binary(), [binary()], integer()) ->
@@ -338,13 +373,6 @@ binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_bi
     not_loaded(?LINE).
 
 segment_tag_get(Namespace, Set, Key, Tag) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(Tag) ->
-    not_loaded(?LINE).
-
-cdt_get(Namespace, Set, Key) ->
-    cdt_get(Namespace, Set, Key, {0, 0, 30000, 1000}).
-% {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}  timeouts in milliseconds
--spec cdt_get(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
-cdt_get(Namespace, Set, Key, _Policy) when is_binary(Namespace), is_binary(Set), is_binary(Key) ->
     not_loaded(?LINE).
 
 -spec cdt_expire(binary(), binary(), binary(), integer()) -> {ok, [{binary(), term()}]} | {error, string()}.

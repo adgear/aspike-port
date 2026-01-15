@@ -67,7 +67,6 @@ set pagination off
 # Set useful breakpoints
 #break cdt_put_sync
 #break cdt_put_async
-# Optional breakpoints (comment out if they don't work)
 #break async_methods.cpp:74
 #break async_methods.cpp:289
 
