@@ -110,7 +110,6 @@
 
 -define(LIBNAME, ?MODULE).
 
--define(ASPIKE_API_ASYNC_MODE_TERM, aspike_async_api).
 -define(ASPIKE_API_ASYNC_MODE_UNLEASH, <<"aspike_async_api">>).
 
 % -------------------------------------------------------------------------------
@@ -185,7 +184,7 @@ get_api_mode(OperationName) ->
             AsyncByDefault = true,
             % first check persistent_term as it's internal registry and more fundamental
             % than Unleash switch
-            DoAsyncApi = persistent_term:get(?ASPIKE_API_ASYNC_MODE_TERM, AsyncByDefault),
+            DoAsyncApi = persistent_term:get(aspike_async_api, AsyncByDefault),
             case DoAsyncApi of
                 true ->
                     % if we are allowed to do async let's consult Unleash then
