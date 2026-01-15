@@ -110,7 +110,8 @@
 
 -define(LIBNAME, ?MODULE).
 
--define(ASPIKE_API_ASYNC_MODE, aspike_async_api).
+-define(ASPIKE_API_ASYNC_MODE_TERM, aspike_async_api).
+-define(ASPIKE_API_ASYNC_MODE_UNLEASH, <<"aspike_async_api">>).
 
 % -------------------------------------------------------------------------------
 
@@ -174,27 +175,56 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
--spec get_api_mode(atom()) -> atom().
+-spec get_api_mode(atom()) -> sync | async.
 get_api_mode(OperationName) ->
-
-%%    case 'Elixir.Unleash':'enabled?'(<<"optedout_ctv_fcap">>) of
-%%        true ->
-%%            rtb_gateway_utils:make_tifa_hash(Ifa, Ua, Ip, Ipv6);
-%%        _ ->
-%%            undefined
-%%    end,
-
-    AsyncModeEnabledByDefault = true,
-    DoAsyncApi = persistent_term:get(?ASPIKE_API_ASYNC_MODE, AsyncModeEnabledByDefault),
-    case DoAsyncApi of
-        true ->
-            case OperationName of
-                someOperationYouWantBeSync -> sync;
-                _ -> async
-            end;
-        _ -> sync
+    case OperationName of
+        % this is a mechanism to keep some operations in required mode
+        % even if other switches dictate the opposite
+        someOperationYouWantBeSync -> sync;
+        _ ->
+            AsyncByDefault = true,
+            % first check persistent_term as it's internal registry and more fundamental
+            % than Unleash switch
+            DoAsyncApi = persistent_term:get(?ASPIKE_API_ASYNC_MODE_TERM, AsyncByDefault),
+            case DoAsyncApi of
+                true ->
+                    % if we are allowed to do async let's consult Unleash then
+                    get_api_mode_from_unleash();
+                _ -> sync
+            end
     end.
 
+-spec get_api_mode_from_unleash() -> sync | async.
+get_api_mode_from_unleash() ->
+    CacheKey = unleash_aspike_api_mode_cached_value,
+
+    CachedValue = case erlang:get(CacheKey) of
+        undefined -> undefined;
+        {until, TS, Value} ->
+            Now = erlang:system_time(seconds),
+            if
+                TS < Now -> Value;
+                true -> undefined
+            end
+    end,
+
+    case CachedValue of
+        undefined ->
+            % TODO: commented out as I don't have unleash module loaded yet while
+            % running my quick tests
+            %case 'Elixir.Unleash':'enabled?'(?ASPIKE_API_ASYNC_MODE_UNLEASH) of
+            UnleashValue = case true of
+                true -> async;
+                _ -> sync
+            end,
+            % we are getting Now again intentionally to stay as close
+            % to unleash reply as possible.
+            CachedFor = 5, % in seconds
+            Expire = erlang:system_time(seconds) + CachedFor,
+            erlang:put(CacheKey, {until, Expire, UnleashValue}),
+            UnleashValue;
+        Mode -> Mode
+    end.
 -spec call_aerospike_async_nif(function()) -> {ok, string()} | {error, string()}.
 call_aerospike_async_nif(AsyncCmd) ->
     % TimeToWait has a temporary value and will be adjusted based on
