@@ -1,4 +1,4 @@
-/* aerocalls.c */
+/* aerocalls.cpp */
 
 #include "ei.h"
 #include <string.h>
@@ -39,13 +39,12 @@
 #define AS_BIN_NAME_MAX_SIZE 16
 #define MAX_BINS_NUMBER 1024
 
-const char DEFAULT_HOST[] = "127.0.0.1";
+// const char DEFAULT_HOST[] = "127.0.0.1";
 // const int DEFAULT_PORT = 3000;
-const int DEFAULT_PORT = 3010;
-const char DEFAULT_NAMESPACE[] = "test";
-const char DEFAULT_SET[] = "eg-set";
-const char DEFAULT_KEY_STR[] = "eg-key";
-const uint32_t DEFAULT_NUM_KEYS = 20;
+// const char DEFAULT_NAMESPACE[] = "test";
+// const char DEFAULT_SET[] = "eg-set";
+// const char DEFAULT_KEY_STR[] = "eg-key";
+// const uint32_t DEFAULT_NUM_KEYS = 20;
 
 typedef struct {
     ei_x_buff* env;
@@ -137,14 +136,14 @@ int is_connected = 0;
 
 typedef char byte;
 
+extern "C" {
 int write_cmd(byte *buf, int len, int fd);
-
-
 int ifail(int ind, int fd);
 int fail(const char *msg, int fd);
 int note(const char *msg, int fd);
 int is_function_call(const char *buf, int *index, int *arity);
 int function_call(const char *buf, int *index, int arity, int fd_out);
+}
 
 int call_cluster_info(const char *buf, int *index, int arity, int fd_out);
 int call_config_info(const char *buf, int *index, int arity, int fd_out);
@@ -179,8 +178,10 @@ int call_host_info(const char *buf, int *index, int arity, int fd_out);
 
 int call_help(const char *buf, int *index, int arity, int fd_out);
 
+extern "C" {
 int call_foo(const char *buf, int *index, int arity, int fd_out);
 int call_bar(const char *buf, int *index, int arity, int fd_out);
+}
 
 int call_port_cdt_get(const char *buf, int *index, int arity, int fd_out);
 int call_port_cdt_put(const char *buf, int *index, int arity, int fd_out);
@@ -976,7 +977,7 @@ static void dump_bin(ei_x_buff *p_res_buf, const as_bin* p_bin) {
         default:
             val_as_str = as_val_tostring(as_bin_get_value(p_bin));
             ei_x_encode_string(p_res_buf, val_as_str);
-            free(val_as_str);
+            cf_free(val_as_str);
     }
 }
 
@@ -1022,7 +1023,7 @@ static void dump_binary_bin(ei_x_buff *p_res_buf, const as_bin* p_bin) {
         default:
             val_as_str = as_val_tostring(as_bin_get_value(p_bin));
             ei_x_encode_string(p_res_buf, val_as_str);
-            free(val_as_str);
+            cf_free(val_as_str);
     }
 }
 
@@ -1156,7 +1157,7 @@ static void format_value_out(ei_x_buff *p_res_buf, as_val_t type, as_bin_value *
         default:
             val_as_str = as_val_tostring(val);
             ei_x_encode_string(p_res_buf, val_as_str);
-            free(val_as_str);
+            cf_free(val_as_str);
     }
 
 }
@@ -1169,7 +1170,7 @@ static int dump_cdt_records(ei_x_buff *p_res_buf, const as_record *p_rec) {
     } else if (p_rec->key.valuep) {
 	    char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
         OKP(key_val_as_str)
-	    free(key_val_as_str);
+	    cf_free(key_val_as_str);
         return res;
     } else {
 
@@ -1211,7 +1212,7 @@ static int binary_dump_records(ei_x_buff *p_res_buf, const as_record *p_rec) {
     if (p_rec->key.valuep) {
 	char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
         OKP(key_val_as_str)
-	free(key_val_as_str);
+	cf_free(key_val_as_str);
         return res;
     }
 
@@ -1239,7 +1240,7 @@ static int dump_records(ei_x_buff *p_res_buf, const as_record *p_rec) {
 	if (p_rec->key.valuep) {
 		char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
         OKP(key_val_as_str)
-		free(key_val_as_str);
+		cf_free(key_val_as_str);
         return res;
 	}
 
@@ -1404,7 +1405,7 @@ int call_key_select(const char *buf, int *index, int arity, int fd_out) {
             ERROR("invalid bin")
             goto end;
         }
-        bins[i] = strdup(bin);
+        bins[i] = (const char *)cf_strdup(bin);
     }
     bins[i] = NULL;
 
@@ -1424,7 +1425,7 @@ int call_key_select(const char *buf, int *index, int arity, int fd_out) {
         as_record_destroy(p_rec);
     }
     for (int j = 0; j < i; j++) {
-        free((void *)bins[j]);
+        cf_free((void *)bins[j]);
     }
 
     POST
@@ -1576,7 +1577,7 @@ int call_node_info(const char *buf, int *index, int arity, int fd_out) {
     ei_x_encode_list_header(&res_buf, 1);
     ei_x_encode_string(&res_buf, &info[0]);
     ei_x_encode_empty_list(&res_buf);
-    free(info);
+    cf_free(info);
 
     as_node_release(node);
     POST
@@ -1644,7 +1645,7 @@ int call_host_info(const char *buf, int *index, int arity, int fd_out) {
     ei_x_encode_list_header(&res_buf, 1);
     ei_x_encode_string(&res_buf, &info[0]);
     ei_x_encode_empty_list(&res_buf);
-    free(&info[0]);
+    cf_free(&info[0]);
 
 
     POST
@@ -1676,7 +1677,7 @@ int call_help(const char *buf, int *index, int arity, int fd_out) {
     }
 
     OK(info)
-    free(info);
+    cf_free(info);
 
     POST
 }
