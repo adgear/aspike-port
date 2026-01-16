@@ -111,6 +111,7 @@
 -define(LIBNAME, ?MODULE).
 
 -define(ASPIKE_API_ASYNC_MODE_UNLEASH, <<"aspike_async_api">>).
+-define(STAT_COUNTER, rtb_gateway_aspike_async_calls).
 
 % -------------------------------------------------------------------------------
 
@@ -235,22 +236,30 @@ call_aerospike_async_nif(AsyncCmd) ->
         {ok, in_progress} ->
             % Request is accepted for processing
             receive
-                {ok, Response} -> {ok, Response};
+                {ok, Response} ->
+                    prometheus_counter:inc(?STAT_COUNTER, [<<"ok">>, <<"normal">>]),
+                    {ok, Response};
                 {error, {connection_pool_exhausted, ErrorMessage}} ->
                     % Specific handling for connection pool exhaustion
                     % Could implement retry logic, backpressure, etc.,
                     % but for now we just return the error
+                    prometheus_counter:inc(?STAT_COUNTER, [<<"error">>, <<"connection_pool_exhausted">>]),
                     {error, ErrorMessage};
-                {error, {_ErrorCode, ErrorMessage}} ->
+                {error, {ErrorCode, ErrorMessage}} ->
+                    prometheus_counter:inc(?STAT_COUNTER, [<<"error">>, ErrorCode]),
                     {error, ErrorMessage}
-            after TimeToWait -> {error, <<"timeout waiting for the response from aerospike">>}
+            after TimeToWait ->
+                prometheus_counter:inc(?STAT_COUNTER, [<<"timeout">>, <<"">>]),
+                {error, <<"timeout waiting for the response from aerospike">>}
             end;
         {ok, Response} ->
             % Operation has completed. Probably it happened because there is nothing to do,
             % like the data provided to nif method require no api call
+            prometheus_counter:inc(?STAT_COUNTER, [<<"ok">>, <<"no_ops">>]),
             {ok, Response};
-        {error, {_ErrorCode, ErrorMessage}} ->
+        {error, {ErrorCode, ErrorMessage}} ->
             % Handle other types of errors if necessary
+            prometheus_counter:inc(?STAT_COUNTER, [<<"error">>, ErrorCode]),
             {error, ErrorMessage}
     end.
 
