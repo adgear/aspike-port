@@ -25,7 +25,6 @@
 #include <time.h>
 
 #include <chrono>
-#include <format>
 #include <functional>
 #include <iostream>
 #include <string>
