@@ -35,7 +35,6 @@
    pool_cdt_read/1
 ]).
 
-
 -define(FCAP_BIN, <<"fcap_map">>).
 
 dima_init() ->

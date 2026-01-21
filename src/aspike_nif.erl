@@ -3,6 +3,7 @@
 -module(aspike_nif).
 
 -include("../include/defines.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -export([
     as_init/0,
@@ -111,7 +112,7 @@
 -define(LIBNAME, ?MODULE).
 
 -define(ASPIKE_API_ASYNC_MODE_UNLEASH, <<"aspike_async_api">>).
--define(STAT_COUNTER, rtb_gateway_aspike_async_calls).
+-define(ASYNC_STAT_COUNTER, rtb_gateway_aspike_async_calls).
 
 % -------------------------------------------------------------------------------
 
@@ -230,6 +231,7 @@ call_aerospike_async_nif(AsyncCmd) ->
     % TimeToWait has a temporary value and will be adjusted based on
     % production environment, like what is p99 of the current time
     % the async request takes
+    ?LOG_INFO("executing call_aerospike_async_nif() ...", []),
     TimeToWait = 15, % in ms
     Res = AsyncCmd(),
     case Res of
@@ -237,29 +239,29 @@ call_aerospike_async_nif(AsyncCmd) ->
             % Request is accepted for processing
             receive
                 {ok, Response} ->
-                    prometheus_counter:inc(?STAT_COUNTER, [<<"ok">>, <<"normal">>]),
+                    prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"ok">>, <<"normal">>]),
                     {ok, Response};
                 {error, {connection_pool_exhausted, ErrorMessage}} ->
                     % Specific handling for connection pool exhaustion
                     % Could implement retry logic, backpressure, etc.,
                     % but for now we just return the error
-                    prometheus_counter:inc(?STAT_COUNTER, [<<"error">>, <<"connection_pool_exhausted">>]),
+                    prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"error">>, <<"connection_pool_exhausted">>]),
                     {error, ErrorMessage};
                 {error, {ErrorCode, ErrorMessage}} ->
-                    prometheus_counter:inc(?STAT_COUNTER, [<<"error">>, ErrorCode]),
+                    prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"error">>, ErrorCode]),
                     {error, ErrorMessage}
             after TimeToWait ->
-                prometheus_counter:inc(?STAT_COUNTER, [<<"timeout">>, <<"">>]),
+                prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"timeout">>, <<"">>]),
                 {error, <<"timeout waiting for the response from aerospike">>}
             end;
         {ok, Response} ->
             % Operation has completed. Probably it happened because there is nothing to do,
             % like the data provided to nif method require no api call
-            prometheus_counter:inc(?STAT_COUNTER, [<<"ok">>, <<"no_ops">>]),
+            prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"ok">>, <<"no_ops">>]),
             {ok, Response};
         {error, {ErrorCode, ErrorMessage}} ->
             % Handle other types of errors if necessary
-            prometheus_counter:inc(?STAT_COUNTER, [<<"error">>, ErrorCode]),
+            prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"error">>, ErrorCode]),
             {error, ErrorMessage}
     end.
 
