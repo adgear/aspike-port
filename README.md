@@ -4,30 +4,31 @@ Obviously you need a running instance of Aerospike. Currently, in the production
 development purposes it's OK to go with version 7. Version 8 was found having many differences from 7 and is
 not yet tested. CE (Community Edition) version is fine for development. It's recommended to use docker
 image to run Aerospike, but you can choose any. For reference, you can follow guides on this page:
-https://aerospike.com/download/server/community/
-
+ * https://aerospike.com/download/server/community/
+ * https://hub.docker.com/r/aerospike/aerospike-server
+ 
 For simplicity, run next command to download and run aerospike docker image:
 ```bash
-docker run -d --name aerospike --ulimit nofile=65536:65536 -p 3000:3000 -p 3001:3001 -p 3002:3002 -p 3003:3003 aerospike:ce-7.1.0.0
+docker run -d --rm --name aerospike_test --ulimit nofile=65536:65536 -p 3000:3000 -p 3001:3001 -p 3002:3002 -p 3003:3003 aerospike:ce-7.1.0.0
 ```
-This will download and store image and create a container under 'aerospike' name. Later you can reference this container with commands like:
+This will download and store image and create a container under 'aerospike_test' name. Later you can reference this container with commands like:
 ```bash
-docker stop aerospike
-docker start aerospike
-docker logs aerospike # to get logs from Aerospike
-docker exec -ti aerospike /bin/bash # to get shell inside container
+docker stop aerospike_test
+docker start aerospike_test
+docker logs aerospike_test # to get logs from Aerospike
+docker exec -ti aerospike_test /bin/bash # to get shell inside container
 ```
 
 You'll need to know the IP address of the aerospike instance, so run the command
 ```bash
-docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' aerospike
+docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' aerospike_test
 ```
-and you should get something like `172.17.0.2`. If that command fails with `template parsing error` just run
-`docker inspect aerospike` and try to find the `IPAddress` record manually.
+and you should get something like `172.17.0.1`. If that command fails with `template parsing error` just run
+`docker inspect aerospike_test` and try to find the `IPAddress` record manually.
 
 If you need to talk to aerospike in AQL you can run the aql utility:
 ```bash
-docker run -ti aerospike/aerospike-tools:latest aql -h 172.17.0.2
+docker run --rm -ti aerospike/aerospike-tools:latest aql -h 172.17.0.1
 ```
 and there you can run sample queries like
 ```sql
@@ -41,7 +42,7 @@ to see specific record that namespace/set.
 
 If you need to run AS Admin (ASADM) you can run next command:
 ```bash
-docker run -ti aerospike/aerospike-tools:latest asadm -h 172.17.0.2
+docker run --rm -ti aerospike/aerospike-tools:latest asadm -h 172.17.0.1
 ```
 
 ## Building aspike-port
@@ -54,13 +55,13 @@ $ make
 
 ## Run perf tests
 
-To start the Aerospike client, run the erlang shell:
+To test Aerospike client, run the erlang shell:
 ```bash
 erl -pa _build/default/lib/aspike_port/ebin
 ```
 and then run next code to initialize NIF connection:
 ```erlang
-application:set_env(aspike_port, host, "172.17.0.2").
+application:set_env(aspike_port, host, "172.17.0.1").
 application:set_env(aspike_port, port, 3000).
 application:set_env(aspike_port, user, "").
 application:set_env(aspike_port, psw, "").
@@ -68,6 +69,11 @@ aspike_nif:as_init().
 aspike_nif:host_add().
 aspike_nif:connect().
 aspike_nif_perf:mp_insert(10, 10, 0).
+```
+
+TODO: define how to use these tests.
+```
+rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_perf dima_quick_test
 ```
 
 Next you can run very basic commands just to make sure the connection working and aerospike is able to
