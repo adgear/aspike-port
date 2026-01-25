@@ -67,24 +67,21 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 
     if (err) {
         ERL_NIF_TERM error_msg;
-        ERL_NIF_TERM error_code;
 
         if (err->code == AEROSPIKE_ERR_NO_MORE_CONNECTIONS) {
             // Special handling for connection pool exhaustion
-            error_code = enif_make_atom(cb_data->msg_env, "connection_pool_exhausted");
             error_msg = enif_make_string(cb_data->msg_env, "connection_pool_exhausted", ERL_NIF_UTF8);
         } else {
             // Regular error message
-            char int_buffer[32];
-            snprintf(int_buffer, sizeof(int_buffer), "%d", err->code);
-            error_code = enif_make_atom(cb_data->msg_env, int_buffer);
             if (strlen(err->message) != 0) {
                 error_msg = enif_make_string(cb_data->msg_env, err->message, ERL_NIF_UTF8);
             } else {
                 error_msg = enif_make_string(cb_data->msg_env, "Unknown error occurred", ERL_NIF_UTF8);
             }
         }
-        ERL_NIF_TERM error_tuple = enif_make_tuple2(cb_data->msg_env, error_code, error_msg);
+        auto nifErrorCode = enif_make_int(cb_data->msg_env, ASPIKE_NIF_OK);
+        auto aspikeErrorCode = enif_make_int(cb_data->msg_env, err->code);
+        ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->msg_env, nifErrorCode, aspikeErrorCode, error_msg);
 
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_error, error_tuple);
     } else {
@@ -134,12 +131,10 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     }
     // now the list points to structure like
     // [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}]
-    ERL_NIF_TERM rc, msg;
     if (bins_amount == 0) {
-        // just a check if there is something we should do at all
-        rc = erl_ok;
-        msg = enif_make_string(env, "put", ERL_NIF_UTF8);
-        return enif_make_tuple2(env, rc, msg);
+        // just a check if there is something we should do at all, and if not - complete this call
+        auto msg = enif_make_string(env, "put", ERL_NIF_UTF8);
+        return enif_make_tuple2(env, erl_ok, msg);
     }
 
     long ttl;
@@ -219,7 +214,10 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     // Get caller PID and create callback data
     if (!enif_self(env, &cb_data->caller_pid)) {
         delete cb_data;
-        return enif_make_tuple2(env, erl_error, enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8));
+        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_NO_CALLER_ID);
+        auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+        auto message = enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8);
+        return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
     }
 
     as_key record_key;
@@ -297,7 +295,10 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                         as_key_destroy(&record_key);
                         as_operations_destroy(&operations);
                         delete cb_data;
-                        return enif_make_tuple2(env, erl_error, enif_make_atom(env, "failed to allocate memory for erl_key_name"));
+                        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_MEMORY_ALLOC_ERR);
+                        auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+                        auto message = enif_make_string(env, "Failed to allocate memory for erl_key_name", ERL_NIF_UTF8);
+                        return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
                     }
                     // create aerospike string which will be freed by context on its removal
                     as_string* key_name = as_string_new(copy_on_heap, true);
@@ -318,7 +319,10 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                         as_key_destroy(&record_key);
                         as_operations_destroy(&operations);
                         delete cb_data;
-                        return enif_make_tuple2(env, erl_error, enif_make_atom(env, "failed to allocate memory for erl_value_data"));
+                        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_MEMORY_ALLOC_ERR);
+                        auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+                        auto message = enif_make_string(env, "Failed to allocate memory for erl_value_data", ERL_NIF_UTF8);
+                        return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
                     }
                     as_bytes* value_data = as_bytes_new_wrap(copy_on_heap, erl_value_data.size, true);
                     // next line creates a key 'value' in the map we created above in 'opnum == 1'
@@ -362,20 +366,17 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     ERL_NIF_TERM return_data;
     if (status != AEROSPIKE_OK) {
         // Failed to initiate async operation
-
         // Cleanup callback data
         delete cb_data;
-
-        char int_buffer[32];
-        snprintf(int_buffer, sizeof(int_buffer), "%d", err.code);
-        ERL_NIF_TERM error_code = enif_make_atom(env, int_buffer);
         ERL_NIF_TERM error_msg;
         if (strlen(err.message) != 0) {
             error_msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
         } else {
             error_msg = enif_make_string(env, "Unknown error occurred", ERL_NIF_UTF8);
         }
-        ERL_NIF_TERM error_tuple = enif_make_tuple2(env, error_code, error_msg);
+        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_OK);
+        auto aspikeErrorCode = enif_make_int(env, err.code);
+        ERL_NIF_TERM error_tuple = enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, error_msg);
 
         return_data = enif_make_tuple2(env, erl_error, error_tuple);
     } else {
@@ -398,24 +399,21 @@ static void cdt_get_async_callback(as_error* err, as_record* record, void* udata
 
     if (err) {
         ERL_NIF_TERM error_msg;
-        ERL_NIF_TERM error_code;
 
         if (err->code == AEROSPIKE_ERR_NO_MORE_CONNECTIONS) {
             // Special handling for connection pool exhaustion
-            error_code = enif_make_atom(cb_data->msg_env, "connection_pool_exhausted");
             error_msg = enif_make_string(cb_data->msg_env, "connection_pool_exhausted", ERL_NIF_UTF8);
         } else {
             // Regular error message
-            char int_buffer[32];
-            snprintf(int_buffer, sizeof(int_buffer), "%d", err->code);
-            error_code = enif_make_atom(cb_data->msg_env, int_buffer);
             if (strlen(err->message) != 0) {
                 error_msg = enif_make_string(cb_data->msg_env, err->message, ERL_NIF_UTF8);
             } else {
                 error_msg = enif_make_string(cb_data->msg_env, "Unknown error occurred", ERL_NIF_UTF8);
             }
         }
-        ERL_NIF_TERM error_tuple = enif_make_tuple2(cb_data->msg_env, error_code, error_msg);
+        auto nifErrorCode = enif_make_int(cb_data->msg_env, ASPIKE_NIF_OK);
+        auto aspikeErrorCode = enif_make_int(cb_data->msg_env, err->code);
+        ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->msg_env, nifErrorCode, aspikeErrorCode, error_msg);
 
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_error, error_tuple);
     } else {
@@ -485,7 +483,10 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     // Get caller PID and create callback data
     if (!enif_self(env, &cb_data->caller_pid)) {
         delete cb_data;
-        return enif_make_tuple2(env, erl_error, enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8));
+        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_NO_CALLER_ID);
+        auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+        auto message = enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8);
+        return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
     }
 
     as_key record_key;
@@ -497,20 +498,17 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     ERL_NIF_TERM return_data;
     if (status != AEROSPIKE_OK) {
         // Failed to initiate async operation
-
         // Cleanup callback data
         delete cb_data;
-
-        char int_buffer[32];
-        snprintf(int_buffer, sizeof(int_buffer), "%d", err.code);
-        ERL_NIF_TERM error_code = enif_make_atom(env, int_buffer);
         ERL_NIF_TERM error_msg;
         if (strlen(err.message) != 0) {
             error_msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
         } else {
             error_msg = enif_make_string(env, "Unknown error occurred", ERL_NIF_UTF8);
         }
-        ERL_NIF_TERM error_tuple = enif_make_tuple2(env, error_code, error_msg);
+        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_OK);
+        auto aspikeErrorCode = enif_make_int(env, err.code);
+        ERL_NIF_TERM error_tuple = enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, error_msg);
 
         return_data = enif_make_tuple2(env, erl_error, error_tuple);
     } else {
