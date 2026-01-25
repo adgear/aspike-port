@@ -16,7 +16,6 @@
     host_list/0,
     connect/0,
     connect/2,
-    get_api_mode/1,
     key_exists/0,
     key_exists/1,
     key_exists/3,
@@ -60,12 +59,8 @@
     cdt_expire/4,
     cdt_delete_by_keys/5,
     cdt_delete_by_keys_batch/4,
-    cdt_put/5,
-    cdt_put/6,
     cdt_put_sync/6,
     cdt_put_async/6,
-    cdt_get/3,
-    cdt_get/4,
     cdt_get_sync/4,
     cdt_get_async/4,
     segment_tag_get/4
@@ -110,9 +105,6 @@
 -on_load(init/0).
 
 -define(LIBNAME, ?MODULE).
-
--define(ASPIKE_API_ASYNC_MODE_UNLEASH, <<"aspike_async_api">>).
--define(ASYNC_STAT_COUNTER, rtb_gateway_aspike_async_calls).
 
 % -------------------------------------------------------------------------------
 
@@ -176,95 +168,6 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
--spec get_api_mode(atom()) -> sync | async.
-get_api_mode(OperationName) ->
-    case OperationName of
-        % this is a mechanism to keep some operations in required mode
-        % even if other switches dictate the opposite
-        someOperationYouWantBeSync -> sync;
-        _ ->
-            AsyncByDefault = true,
-            % first check persistent_term as it's internal registry and more fundamental
-            % than Unleash switch
-            DoAsyncApi = persistent_term:get(aspike_async_api, AsyncByDefault),
-            case DoAsyncApi of
-                true ->
-                    % if we are allowed to do async let's consult Unleash then
-                    get_api_mode_from_unleash();
-                _ -> sync
-            end
-    end.
-
--spec get_api_mode_from_unleash() -> sync | async.
-get_api_mode_from_unleash() ->
-    CacheKey = unleash_aspike_api_mode_cached_value,
-
-    CachedValue = case erlang:get(CacheKey) of
-        undefined -> undefined;
-        {until, TS, Value} ->
-            Now = erlang:system_time(seconds),
-            if
-                TS < Now -> Value;
-                true -> undefined
-            end
-    end,
-
-    case CachedValue of
-        undefined ->
-            % TODO: commented out as I don't have unleash module loaded yet while
-            % running my quick tests
-            %case 'Elixir.Unleash':'enabled?'(?ASPIKE_API_ASYNC_MODE_UNLEASH) of
-            UnleashValue = case true of
-                true -> async;
-                _ -> sync
-            end,
-            % we are getting Now again intentionally to stay as close
-            % to unleash reply as possible.
-            CachedFor = 5, % in seconds
-            Expire = erlang:system_time(seconds) + CachedFor,
-            erlang:put(CacheKey, {until, Expire, UnleashValue}),
-            UnleashValue;
-        Mode -> Mode
-    end.
--spec call_aerospike_async_nif(function()) -> {ok, string()} | {error, string()}.
-call_aerospike_async_nif(AsyncCmd) ->
-    % TimeToWait has a temporary value and will be adjusted based on
-    % production environment, like what is p99 of the current time
-    % the async request takes
-    ?LOG_INFO("executing call_aerospike_async_nif() ...", []),
-    TimeToWait = 15, % in ms
-    Res = AsyncCmd(),
-    case Res of
-        {ok, in_progress} ->
-            % Request is accepted for processing
-            receive
-                {ok, Response} ->
-                    prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"ok">>, <<"normal">>]),
-                    {ok, Response};
-                {error, {connection_pool_exhausted, ErrorMessage}} ->
-                    % Specific handling for connection pool exhaustion
-                    % Could implement retry logic, backpressure, etc.,
-                    % but for now we just return the error
-                    prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"error">>, <<"connection_pool_exhausted">>]),
-                    {error, ErrorMessage};
-                {error, {ErrorCode, ErrorMessage}} ->
-                    prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"error">>, ErrorCode]),
-                    {error, ErrorMessage}
-            after TimeToWait ->
-                prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"timeout">>, <<"">>]),
-                {error, <<"timeout waiting for the response from aerospike">>}
-            end;
-        {ok, Response} ->
-            % Operation has completed. Probably it happened because there is nothing to do,
-            % like the data provided to nif method require no api call
-            prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"ok">>, <<"no_ops">>]),
-            {ok, Response};
-        {error, {ErrorCode, ErrorMessage}} ->
-            % Handle other types of errors if necessary
-            prometheus_counter:inc(?ASYNC_STAT_COUNTER, [<<"error">>, ErrorCode]),
-            {error, ErrorMessage}
-    end.
-
 key_exists() ->
     key_exists(?DEFAULT_KEY).
 
@@ -315,51 +218,25 @@ key_put(Namespace, Set, Key, Lst) when
 binary_put(_Namespace, _Set, _Key, _BinList, _TTL) ->
     not_loaded(?LINE).
 
-% in cdt_put() the BinList looks like:
-% [{<<"fcap_map">>, [<<"map_key_1">>, <<"map_value_1">>, 123, <<"map_key_2">>, <<"map_value_2">>, 456]}]
-% which will be transformed into map
-% KEY_ORDERED_MAP('{"map_key_1":{"ttl":123, "value":"map_value_1", "wt":1766794574}, "map_key_2":{"ttl":456, "value":"map_value_2", "wt":1766794574}}')
-% to be stored in Aerospike under the bin name "fcap_map".
-% 'wt' key is added by NIF implementation of cdt_put() and basically a timestamp of write time (wt).
-% Policy is a tuple expanded as
-% {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}
-% timeouts and sleep time should be given in milliseconds
-% Note: SleepBetweenRetries is ignored by aerospike c-client in async mode
-cdt_put(Namespace, Set, RecordKeyName, BinList, TTL) ->
-    cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, {0, 0, 30000, 1000}).
--spec cdt_put(binary(), binary(), binary(), 
+-spec cdt_put_sync(binary(), binary(), binary(),
         [{binary(), binary()|integer()|[integer()]}], integer(), 
-        {integer(), integer(), integer(), integer()}) -> 
+        {integer(), integer(), integer(), integer()}) ->
             {ok, string()} | {error, string()}.
-cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
-    case get_api_mode(cdt_put) of
-        sync ->
-            cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy);
-        async ->
-            AsyncCmd = fun() -> cdt_put_async(Namespace, Set, RecordKeyName, BinList, TTL, Policy) end,
-            call_aerospike_async_nif(AsyncCmd)
-    end.
-
 cdt_put_sync(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
+
+-spec cdt_put_async(binary(), binary(), binary(),
+    [{binary(), binary()|integer()|[integer()]}], integer(),
+    {integer(), integer(), integer(), integer()}) ->
+    {ok, string()} | {error, string()}.
 cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 
-cdt_get(Namespace, Set, RecordKeyName) ->
-    cdt_get(Namespace, Set, RecordKeyName, {0, 0, 30000, 1000}).
-% {MaxRetries, SleepBetweenRetries, SocketTimeout, TotalTimeout}  timeouts in milliseconds
--spec cdt_get(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
-cdt_get(Namespace, Set, RecordKeyName, Policy) when is_binary(Namespace), is_binary(Set), is_binary(RecordKeyName) ->
-    case get_api_mode(cdt_get) of
-        sync ->
-            cdt_get_sync(Namespace, Set, RecordKeyName, Policy);
-        async ->
-            AsyncCmd = fun() -> cdt_get_async(Namespace, Set, RecordKeyName, Policy) end,
-            call_aerospike_async_nif(AsyncCmd)
-    end.
-
+-spec cdt_get_sync(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
 cdt_get_sync(_Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
+
+-spec cdt_get_async(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
 cdt_get_async(_Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
 

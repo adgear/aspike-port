@@ -37,9 +37,11 @@
 
 -define(FCAP_BIN, <<"fcap_map">>).
 
+%get_api_mode(_Operation) -> sync.
+get_api_mode(_Operation) -> async.
+
 dima_init() ->
     application:set_env(aspike_port, host, "127.0.0.1"),
-    %application:set_env(aspike_port, host, "192.168.88.69"),
     application:set_env(aspike_port, port, 3000),
     application:set_env(aspike_port, user, ""),
     application:set_env(aspike_port, psw, ""),
@@ -49,7 +51,7 @@ dima_init() ->
 
 dima_quick_test() ->
     dima_init(),
-    Mode = atom_to_list(aspike_nif:get_api_mode(default)),
+    Mode = atom_to_list(get_api_mode(default)),
     io:format("Working in ~s mode with Aerospike server.~n", [Mode]),
     Namespace = <<"test">>,
     SetName = <<"rtb_setname">>,
@@ -59,7 +61,7 @@ dima_quick_test() ->
         {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<"map_value_2_1">>, 345, <<"map_key_2_2">>, <<"map_value_2_2">>, 678]}
     ],
     InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, DataToInsert, 300),
-    io:format("cdt_put result: ~p~n", [InsertRes]),
+    io:format("cdt_put result:~n~p~n", [InsertRes]),
     ReadRes = aspike_nif:cdt_get(Namespace, SetName, PrimaryKey),
     io:format("cdt_get result:~n~p~n", [ReadRes]),
     io:format("This result should equal to:~n~p~n", [DataToInsert]).
@@ -106,7 +108,7 @@ dima_test() ->
             end
         end,
 
-    ModeAtom = aspike_nif:get_api_mode(default),
+    ModeAtom = get_api_mode(default),
     TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfRequests),
 
     %dima_test_loop(TestName, ActionFunc, AmountOfRequests, [300]).
@@ -118,7 +120,7 @@ dima_test_loop(TestName, _, _, []) ->
         {ok, Stats} ->
             %io:format("~nStats: ~p~n~n", [Stats]),
             ChartSeries = maps:get(chart_series, Stats),
-            ModeAtom = aspike_nif:get_api_mode(default),
+            ModeAtom = get_api_mode(default),
             SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
             JSON = lists:join("", [
                 "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
@@ -250,7 +252,7 @@ dima_collector_process_results(Stats) ->
 
     Stats = erlang:get(collector_stats),
     ChartSeries = maps:get(chart_series, Stats),
-    ModeAtom = aspike_nif:get_api_mode(default),
+    ModeAtom = get_api_mode(default),
     SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
     erlang:put(collector_stats, maps:merge(Stats, #{
         status => done,
@@ -262,7 +264,7 @@ dima_collector_process_results(Stats) ->
     test_runner ! collection_done.
 
 dima_stress_test (AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
-    ModeAtom = aspike_nif:get_api_mode(default),
+    ModeAtom = get_api_mode(default),
     io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
     lists:map(fun(ProcNumber) ->
         spawn(fun() ->
