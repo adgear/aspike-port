@@ -289,8 +289,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     // erl_key_name points to something like <<"map_key_1">>.
                     // Now, make a copy of the string on heap (because the erl_key_name localed on stack)
                     // so Aerospike will be able to free its memory once the 'key_name' variable will be destroyed.
-                    // And since there is no as_string_new_strndup() method, we have to emulate it:
-                    char * copy_on_heap = (char *)strndup((const char *)erl_key_name.data, erl_key_name.size);
+                    uint8_t * copy_on_heap = (uint8_t *)malloc(sizeof(uint8_t) * erl_key_name.size);
+                    memcpy(copy_on_heap, erl_key_name.data, erl_key_name.size);
                     if (!copy_on_heap) {
                         as_key_destroy(&record_key);
                         as_operations_destroy(&operations);
@@ -301,7 +301,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                         return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
                     }
                     // create aerospike string which will be freed by context on its removal
-                    as_string* key_name = as_string_new(copy_on_heap, true);
+                    as_string* key_name = as_string_new((char *)copy_on_heap, true);
                     as_cdt_ctx_add_map_key_create(context, (as_val*)key_name, AS_MAP_KEY_ORDERED);
                 }
                 opnum++;
@@ -314,7 +314,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     as_string* key_name = as_string_new_strdup("value");
                     // Make a copy of the data on heap (because the erl_value_data localed on stack)
                     // so Aerospike will be able to free its memory once the 'value_data' variable will be destroyed.
-                    uint8_t * copy_on_heap = (uint8_t *)strndup((const char *)erl_value_data.data, erl_value_data.size);
+                    uint8_t * copy_on_heap = (uint8_t *)malloc(sizeof(uint8_t) * erl_value_data.size);
+                    memcpy(copy_on_heap, erl_value_data.data, erl_value_data.size);
                     if (!copy_on_heap) {
                         as_key_destroy(&record_key);
                         as_operations_destroy(&operations);

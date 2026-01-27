@@ -8,7 +8,7 @@
 #define AS_BIN_NAME_MAX_SIZE 16
 #define MAX_BINS_NUMBER 1024
 
-typedef enum aspike_status {
+enum aspike_status {
     ASPIKE_NIF_OK = 0,
 	ASPIKE_NIF_MEMORY_ALLOC_ERR = 1,
     ASPIKE_NIF_NO_CALLER_ID = 2
