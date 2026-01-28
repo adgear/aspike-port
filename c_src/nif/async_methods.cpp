@@ -85,7 +85,7 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_error, error_tuple);
     } else {
-        ERL_NIF_TERM response = enif_make_string(cb_data->msg_env, "done", ERL_NIF_UTF8);
+        ERL_NIF_TERM response = enif_make_string(cb_data->msg_env, "put", ERL_NIF_UTF8);
         result_msg = enif_make_tuple2(cb_data->msg_env, erl_ok, response);
     }
 
@@ -281,6 +281,15 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 // The value of this key will be another map, so let's create a context for
                 // this map
                 as_cdt_ctx* context = as_cdt_ctx_create(1);
+                if (!context) {
+                    as_key_destroy(&record_key);
+                    as_operations_destroy(&operations);
+                    delete cb_data;
+                    auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_MEMORY_ALLOC_ERR);
+                    auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+                    auto message = enif_make_string(env, "Failed to create CDT context", ERL_NIF_UTF8);
+                    return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
+                }
                 // save context for later removal
                 cb_data->cdt_contexts.push_back(context);
                 // getting first level key name
@@ -289,9 +298,10 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     // erl_key_name points to something like <<"map_key_1">>.
                     // Now, make a copy of the string on heap (because the erl_key_name localed on stack)
                     // so Aerospike will be able to free its memory once the 'key_name' variable will be destroyed.
-                    uint8_t * copy_on_heap = (uint8_t *)malloc(sizeof(uint8_t) * erl_key_name.size);
-                    memcpy(copy_on_heap, erl_key_name.data, erl_key_name.size);
+                    // Allocate size + 1 for null terminator
+                    uint8_t * copy_on_heap = (uint8_t *)malloc(sizeof(uint8_t) * (erl_key_name.size + 1));
                     if (!copy_on_heap) {
+                        // failed to allocate memory
                         as_key_destroy(&record_key);
                         as_operations_destroy(&operations);
                         delete cb_data;
@@ -300,8 +310,21 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                         auto message = enif_make_string(env, "Failed to allocate memory for erl_key_name", ERL_NIF_UTF8);
                         return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
                     }
+                    memcpy(copy_on_heap, erl_key_name.data, erl_key_name.size);
+                    copy_on_heap[erl_key_name.size] = '\0'; // Null terminate the string
                     // create aerospike string which will be freed by context on its removal
                     as_string* key_name = as_string_new((char *)copy_on_heap, true);
+                    if (!key_name) {
+                        // failed to allocate memory
+                        free(copy_on_heap);
+                        as_key_destroy(&record_key);
+                        as_operations_destroy(&operations);
+                        delete cb_data;
+                        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_MEMORY_ALLOC_ERR);
+                        auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+                        auto message = enif_make_string(env, "Failed to create key name string", ERL_NIF_UTF8);
+                        return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
+                    }
                     as_cdt_ctx_add_map_key_create(context, (as_val*)key_name, AS_MAP_KEY_ORDERED);
                 }
                 opnum++;
@@ -315,8 +338,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     // Make a copy of the data on heap (because the erl_value_data localed on stack)
                     // so Aerospike will be able to free its memory once the 'value_data' variable will be destroyed.
                     uint8_t * copy_on_heap = (uint8_t *)malloc(sizeof(uint8_t) * erl_value_data.size);
-                    memcpy(copy_on_heap, erl_value_data.data, erl_value_data.size);
                     if (!copy_on_heap) {
+                        // failed to allocate memory
                         as_key_destroy(&record_key);
                         as_operations_destroy(&operations);
                         delete cb_data;
@@ -325,7 +348,19 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                         auto message = enif_make_string(env, "Failed to allocate memory for erl_value_data", ERL_NIF_UTF8);
                         return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
                     }
+                    memcpy(copy_on_heap, erl_value_data.data, erl_value_data.size);
                     as_bytes* value_data = as_bytes_new_wrap(copy_on_heap, erl_value_data.size, true);
+                    if (!value_data) {
+                        // failed to allocate memory
+                        free(copy_on_heap);
+                        as_key_destroy(&record_key);
+                        as_operations_destroy(&operations);
+                        delete cb_data;
+                        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_MEMORY_ALLOC_ERR);
+                        auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
+                        auto message = enif_make_string(env, "Failed to create value bytes", ERL_NIF_UTF8);
+                        return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
+                    }
                     // next line creates a key 'value' in the map we created above in 'opnum == 1'
                     as_operations_map_put(&operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)value_data);
                 }
