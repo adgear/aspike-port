@@ -6,7 +6,7 @@ not yet tested. CE (Community Edition) version is fine for development. It's rec
 image to run Aerospike, but you can choose any. For reference, you can follow guides on this page:
  * https://aerospike.com/download/server/community/
  * https://hub.docker.com/r/aerospike/aerospike-server
- 
+
 For simplicity, run next command to download and run aerospike docker image:
 ```bash
 docker run -d --rm --name aerospike_test --ulimit nofile=65536:65536 -p 3000:3000 -p 3001:3001 -p 3002:3002 -p 3003:3003 aerospike:ce-7.1.0.0
@@ -73,7 +73,7 @@ aspike_nif_perf:mp_insert(10, 10, 0).
 
 TODO: define how to use these tests.
 ```
-rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_perf dima_quick_test
+rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_perf quick_test
 ```
 
 Next you can run very basic commands just to make sure the connection working and aerospike is able to

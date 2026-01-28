@@ -3,6 +3,7 @@
 #include "ei.h"
 #include <string.h>
 #include <stdlib.h>
+#include <string>
 
 typedef char byte;
 
@@ -13,6 +14,7 @@ int fail(const char *msg, int fd);
 int note(const char *msg, int fd);
 int is_function_call(const char *buf, int *index, int *arity);
 int function_call(const char *buf, int *index, int arity, int fd_out);
+void logfile(std::string str);
 
 int main() {
     byte buf[1000];
