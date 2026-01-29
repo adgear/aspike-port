@@ -1,80 +1,99 @@
--module(aspike_nif_perf).
+-module(aspike_nif_test).
 
 -export([
-    dima_init/0,
-    dima_quick_test/0,
-    dima_test/0,
-    dima_stress_test/3,
-   sp_insert/9,
-   sp_insert/8,
-   pool_insert/8,
-   sp_insert/5,
-   sp_insert/2,
-   sp_insert/1,
-   mp_insert/3,
-   sp_read/2,
-   sp_read/8,
-   mp_reads/3,
-   mp_port_insert/3,
+    init/0,
+    quick_test/0,
+    stress_test/0,
+    get_api_mode/1,
 
-   rand_read/2,
-   rand_read/8,
-   mp_rand_reads/3,
-   infinite_test/4,
+    sp_insert/9,
+    sp_insert/8,
+    pool_insert/8,
+    sp_insert/5,
+    sp_insert/2,
+    sp_insert/1,
+    mp_insert/3,
+    sp_read/2,
+    sp_read/8,
+    mp_reads/3,
+    mp_port_insert/3,
 
-   test_insertion/5,
-   test_reading/3,
-   dump_stats/0,
+    rand_read/2,
+    rand_read/8,
+    mp_rand_reads/3,
+    infinite_test/4,
 
-   cdt_insert_test/5,
-   cdt_insert_test_mk/5,
-   cdt_del_test/5,
-   cdt_del_batch_test/5,
-   cdt_get_test/4,
-   pool_cdt_insert/1,
-   pool_cdt_read/1
+    test_insertion/5,
+    test_reading/3,
+    dump_stats/0,
+
+    cdt_insert_test/5,
+    cdt_insert_test_mk/5,
+    cdt_del_test/5,
+    cdt_del_batch_test/5,
+    cdt_get_test/4,
+    pool_cdt_insert/1,
+    pool_cdt_read/1
 ]).
 
 -define(FCAP_BIN, <<"fcap_map">>).
+-define(ASPIKE_DEFAULT_POLICY, {3, 250, 30000, 1000}).
 
 %get_api_mode(_Operation) -> sync.
 get_api_mode(_Operation) -> async.
 
-dima_init() ->
-    application:set_env(aspike_port, host, "127.0.0.1"),
-    application:set_env(aspike_port, port, 3000),
-    application:set_env(aspike_port, user, ""),
-    application:set_env(aspike_port, psw, ""),
-    aspike_nif:as_init(),
-    aspike_nif:host_add(),
-    io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]).
+init() ->
+    case erlang:get(init_done) of
+        undefined ->
+            application:set_env(aspike_port, host, "127.0.0.1"),
+            application:set_env(aspike_port, port, 3000),
+            application:set_env(aspike_port, user, ""),
+            application:set_env(aspike_port, psw, ""),
+            aspike_nif:as_init(),
+            aspike_nif:host_add(),
+            io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]),
+            erlang:put(init_done, true);
+        _ -> ok
+    end.
 
-dima_quick_test() ->
-    dima_init(),
+quick_test() ->
+    init(),
     Mode = atom_to_list(get_api_mode(default)),
     io:format("Working in ~s mode with Aerospike server.~n", [Mode]),
     Namespace = <<"test">>,
     SetName = <<"rtb_setname">>,
     PrimaryKey = <<"user_defined_key_3">>,
     DataToInsert = [
-        {<<"fcap_map_1">>, [<<"map_key_1_1">>, <<"map_value_1_1">>, 123, <<"map_key_1_2">>, <<"map_value_1_2">>, 456]},
-        {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<"map_value_2_1">>, 345, <<"map_key_2_2">>, <<"map_value_2_2">>, 678]}
+        {<<"fcap_map_1">>, [<<"map_key_1_1">>, <<0, 1, 0, 2, 1>>, 123, <<"map_key_1_2">>, <<0, 1, 0, 2, 2>>, 456]},
+        {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<0, 1, 0, 2, 3>>, 345, <<"map_key_2_2">>, <<0, 1, 0, 2, 4>>, 678]}
     ],
-    InsertRes = aspike_nif:cdt_put(Namespace, SetName, PrimaryKey, DataToInsert, 300),
-    io:format("cdt_put result:~n~p~n", [InsertRes]),
-    ReadRes = aspike_nif:cdt_get(Namespace, SetName, PrimaryKey),
-    io:format("cdt_get result:~n~p~n", [ReadRes]),
-    io:format("This result should equal to:~n~p~n", [DataToInsert]).
 
-dima_test() ->
-    dima_init(),
-    register(test_runner, self()),
-    register(collector, spawn_link(fun() -> dima_collector_start() end)),
+    InsertRes = cdt_put(Namespace, SetName, PrimaryKey, DataToInsert, 300, ?ASPIKE_DEFAULT_POLICY),
+    io:format("cdt_put result:~n~p~n~n", [InsertRes]),
+
+    ReadRes = cdt_get(Namespace, SetName, PrimaryKey, ?ASPIKE_DEFAULT_POLICY),
+    io:format("cdt_get result:~n~p~n~n", [ReadRes]),
+    case ReadRes of
+        {ok, ReadData} ->
+            case aspike_nif_test_utils:compare_cdt_data(DataToInsert, ReadData) of
+                true -> io:format("Read data match the inserted one. All good.~n", []);
+                false -> io:format("Read data doesn't match the inserted one. Investigate why.~n", [])
+            end;
+        {error, Error} ->
+            io:format("Read error happened: ~p.~n", [Error])
+    end.
+
+stress_test() ->
+    init(),
+    register(stress_tester, self()),
+    register(collector, spawn_link(fun() -> aspike_nif_test_utils:collector_start() end)),
 
     TestNamePrefix = "local",
     AmountOfRequests = 10_000,
     %Command = cdt_put,
     Command = cdt_get,
+    %AmountOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
+    AmountOfClients = [10],
 
     Namespace = <<"test">>,
     SetName = <<"test_set">>,
@@ -84,22 +103,22 @@ dima_test() ->
                 RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
                 MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
                 Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Value2 = <<<<"value2_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
                 Bins = [{MapKey1, [Value1, Value2, Counter]}],
                 TTL = 60 * 60,
-                aspike_nif:cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, {500, 0, 30000, 1000})
+                cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, ?ASPIKE_DEFAULT_POLICY)
             end;
         cdt_get ->
             fun(Counter) ->
                 RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Result = aspike_nif:cdt_get(Namespace, SetName, RecordKeyName),
+                Result = cdt_get(Namespace, SetName, RecordKeyName, ?ASPIKE_DEFAULT_POLICY),
                 % now we do some validation
                 case Result of
                     {error, _} -> Result;
                     {ok, Data} ->
                         MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
                         Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                        Value2 = <<<<"value2_">>/binary, (integer_to_binary(Counter))/binary>>,
+                        Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
                         case Data of
                             [{MapKey1, [Value1, {Value2, _,_}]}] -> Result;
                             _ -> {error, <<"cdt_get() doesn't match data put by cdt_put()">>}
@@ -111,198 +130,59 @@ dima_test() ->
     ModeAtom = get_api_mode(default),
     TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfRequests),
 
-    %dima_test_loop(TestName, ActionFunc, AmountOfRequests, [300]).
-    dima_test_loop(TestName, ActionFunc, AmountOfRequests, [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300]).
+    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfRequests, AmountOfClients).
 
-dima_test_loop(TestName, _, _, []) ->
-    collector ! send_stats,
-    receive
-        {ok, Stats} ->
-            %io:format("~nStats: ~p~n~n", [Stats]),
-            ChartSeries = maps:get(chart_series, Stats),
-            ModeAtom = get_api_mode(default),
-            SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
-            JSON = lists:join("", [
-                "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
-                lists:join(", ", lists:map(fun(Data) ->
-                    {AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet} = Data,
-                    io_lib:format("{\"clients\": ~p, \"amountOfOps\": ~p, \"min\": ~p, \"max\": ~p, \"avg\": ~p, \"done\": ~p, \"failed\": ~p}", [AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet])
-                   end, SeriesOfThisMode)),
-                "]}"
-            ]),
-            io:format("JSON: ~s~n", [JSON]),
-            FileName = string:replace(TestName, " ", "_", all) ++ ".json",
-            {ok, FileDesc} = file:open(FileName, [write]),
-            file:write(FileDesc, JSON),
-            file:close(FileDesc),
-            io:format("Saved results to file: ~s~n", [FileName])
-    end;
+cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
+    case get_api_mode(cdt_put) of
+        sync ->
+            aspike_nif:cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy);
+        async ->
+            AsyncCmd = fun() ->
+                aspike_nif:cdt_put_async(Namespace, Set, RecordKeyName, BinList, TTL, Policy)
+                       end,
+            call_aerospike_async_nif(AsyncCmd)
+    end.
 
-dima_test_loop(TestName, ActionFunc, AmountOfRequests, [AmountOfClients | Tail]) ->
-    collector ! {test_starts, AmountOfClients},
-    receive
-        collector_ack -> ok
-    end,
-    dima_stress_test(AmountOfClients, ActionFunc, AmountOfRequests),
-    receive
-        collection_done -> ok
-    end,
-    dima_test_loop(TestName, ActionFunc, AmountOfRequests, Tail).
+cdt_get(Namespace, Set, RecordKeyName, Policy) ->
+    case get_api_mode(cdt_get) of
+        sync ->
+            aspike_nif:cdt_get_sync(Namespace, Set, RecordKeyName, Policy);
+        async ->
+            AsyncCmd = fun() -> aspike_nif:cdt_get_async(Namespace, Set, RecordKeyName, Policy) end,
+            call_aerospike_async_nif(AsyncCmd)
+    end.
 
-dima_collector_start() ->
-    dima_collector_reset_stats(),
-    dima_collector_loop().
+cdt_delete_by_keys(Namespace, Set, Key, BinName, SubkeysList) ->
+    % there is only sync version of this operation right now
+    aspike_nif:cdt_delete_by_keys(Namespace, Set, Key, BinName, SubkeysList).
 
-dima_collector_reset_stats() ->
-    erlang:put(collector_stats, #{
-        status => done,
-        results_received => 0,
-        results_expected => 0,
-        by_clients => #{},
-        chart_series => #{
-            async => [],
-            sync => []
-        }
-    }).
+cdt_delete_by_keys_batch(Namespace, Set, BinName, KeysSubkeysList) ->
+    % there is only sync version of this operation right now
+    aspike_nif:cdt_delete_by_keys_batch(Namespace, Set, BinName, KeysSubkeysList).
 
-dima_collector_loop() ->
-    receive
-        {test_starts, ResultsExpected} ->
-            Stats = erlang:get(collector_stats),
-            erlang:put(collector_stats, maps:merge(Stats, #{
-                results_expected => ResultsExpected,
-                results_received => 0,
-                status => collecting
-            })),
-            test_runner ! collector_ack;
-        {load_finished, Data} ->
-            {Version, Results} = Data,
-            case Version of
-                1 ->
-                    {ClientId, AmountOfOps, OpsDone, ErrorsMet, TimePerOp} = Results,
-                    Stats = erlang:get(collector_stats),
-                    UpdatedStats = maps:merge(Stats, #{
-                        results_received => maps:get(results_received, Stats) + 1,
-                        by_clients => maps:merge(maps:get(by_clients, Stats), #{
-                            ClientId => #{
-                                opsAmount => AmountOfOps,
-                                opsDone => OpsDone,
-                                errorsMet => ErrorsMet,
-                                timePerOp => TimePerOp
-                            }
-                        })
-                    }),
-                    erlang:put(collector_stats, UpdatedStats);
-                    %io:format("Result from child ~p: ops done: ~p, errors met: ~p, avg time per operation : ~p µs ~n", [ClientId, OpsDone, ErrorsMet, TimePerOp]);
-                _ ->
-                    io:format("Collector: Received unknown version from a message: ~p~n", [Version])
+call_aerospike_async_nif(AsyncCmd) ->
+    case AsyncCmd() of
+        {ok, in_progress} ->
+            receive
+                {ok, Response} ->
+                    {ok, Response};
+                {error, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} ->
+                    {error, ErrorMessage}
+            after 100 ->
+                {error, <<"timeout waiting for the response from aerospike">>}
             end;
-        send_stats ->
-            test_runner ! {ok, erlang:get(collector_stats)}
-    end,
-
-    CurrentStats = erlang:get(collector_stats),
-    Status = maps:get(status, CurrentStats),
-    Received = maps:get(results_received, CurrentStats),
-    Expected = maps:get(results_expected, CurrentStats),
-    Remaining = Expected - Received,
-    case {Status, Remaining} of
-        {collecting, 0} ->
-            io:format("All clients have finished~n", []),
-            dima_collector_process_results(CurrentStats);
-        _ ->
-            ok
-    end,
-    dima_collector_loop().
-
-dima_collector_process_results(Stats) ->
-    AmountOfClients = maps:get(results_received, Stats),
-    ByClients = maps:get(by_clients, Stats),
-    ClientIds = maps:keys(ByClients),
-    {Min, Max, Total, OpsPerClient, OpsDone, ErrorsMet} = lists:foldl(fun(ClientId, Acc) ->
-        ClientData = maps:get(ClientId, ByClients),
-        TimePerOp = maps:get(timePerOp, ClientData),
-        OpsPerClient = maps:get(opsAmount, ClientData),
-        OpsDone = maps:get(opsDone, ClientData),
-        ErrorsMet = maps:get(errorsMet, ClientData),
-        {Min, Max, TotalTime, MaxOpsPerClient, TotalOpsDone, TotalErrorsMet} = Acc,
-        {
-            % minimum time per operation
-            min(Min, TimePerOp),
-            % maximum time per operation
-            max(Max, TimePerOp),
-            % average time per operation
-            TotalTime + TimePerOp,
-            % max amount of operations performed by client, which
-            % actually is the same for every client, but still, we use
-            % max function just in case of human error
-            max(MaxOpsPerClient, OpsPerClient),
-            % total amount of successful operations
-            TotalOpsDone + OpsDone,
-            % total amount of failed operations
-            TotalErrorsMet + ErrorsMet
-        }
-    end, {1_000_000_000, -1, 0, 0, 0, 0}, ClientIds),
-    Avg = Total / erlang:length(ClientIds),
-    io:format("Amount of parallel clients: ~p~n", [AmountOfClients]),
-    io:format("Amount of operations per client: ~p~n", [OpsPerClient]),
-    io:format("Min: ~p µs, Max: ~p µs, Avg: ~p µs~n", [Min, Max, Avg]),
-    PercentOfFailed = round((ErrorsMet / (OpsDone + OpsPerClient)) * 100),
-    io:format("Total successful ops: ~p, Total failed ops: ~p (~p % from total)~n", [OpsDone, ErrorsMet, PercentOfFailed]),
-
-    Stats = erlang:get(collector_stats),
-    ChartSeries = maps:get(chart_series, Stats),
-    ModeAtom = get_api_mode(default),
-    SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
-    erlang:put(collector_stats, maps:merge(Stats, #{
-        status => done,
-        %by_clients => #{},
-        chart_series => maps:merge(ChartSeries, #{
-            ModeAtom => lists:append(SeriesOfThisMode, [{AmountOfClients, OpsPerClient, Min, Max, Avg, OpsDone, ErrorsMet}])
-        })
-    })),
-    test_runner ! collection_done.
-
-dima_stress_test (AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
-    ModeAtom = get_api_mode(default),
-    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
-    lists:map(fun(ProcNumber) ->
-        spawn(fun() ->
-            Counter = AmountOfOpsToDo * ProcNumber,
-            ProcName = integer_to_list(ProcNumber),
-            StartTime = erlang:system_time(microsecond),
-            Results = dima_stress_test_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
-            EndTime = erlang:system_time(microsecond),
-            TimePerInsert = (EndTime - StartTime) div AmountOfOpsToDo,
-            { OpsDone, ErrorsMet } = Results,
-            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerInsert}}}
-        end)
-    end, lists:seq(1, AmountOfClients)).
-
-dima_stress_test_loop (_, _, 0, _, Oks, Errs) -> {Oks, Errs};
-
-dima_stress_test_loop (ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Errs) ->
-    Result = ActionFunc(Counter),
-
-    {OpsDone, ErrorsMet} = case Result of
-        {ok, _} ->
-            {Oks + 1, Errs};
-        {error, _ErrorMessage} ->
-            %io:format("~s: got error: ~s~n", [ProcName, ErrorMessage]),
-            {Oks, Errs + 1}
-    end,
-
-    dima_stress_test_loop(ProcName, ActionFunc, AmountOfOpsToDo - 1, Counter + 1, OpsDone, ErrorsMet).
-
-% aspike_nif:cdt_put(<<"test">>, <<"someSet">>, <<"keyName">>, [{<<"key1">>, [<<"value1">>, <<"value2">>, 123]}], 10).
-% aspike_nif:cdt_get(<<"test">>, <<"someSet">>, <<"keyName">>).
+        {ok, Response} ->
+            {ok, Response};
+        {error, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} ->
+            {error, ErrorMessage}
+    end.
 
 cdt_del_test(0, _, _, _, _) -> ok;
 cdt_del_test(N, NKeys, NSKeys, TTL, Timeout) ->
     Key = erlang:iolist_to_binary([<<"Key_Key_Key_Key.namespace.1111111">>, integer_to_binary(rand:uniform(NKeys))]),
     Subkey1 = erlang:iolist_to_binary([<<"Key_Key_Key_Key.subkey">>, integer_to_binary(rand:uniform(NSKeys))]),
     Subkey2 = erlang:iolist_to_binary([<<"Key_Key_Key_Key.subkey">>, integer_to_binary(rand:uniform(NSKeys))]),
-    aspike_nif:cdt_delete_by_keys(
+    cdt_delete_by_keys(
         <<"test">>, <<"gateway_fcap_test1">>, Key, ?FCAP_BIN, [Subkey1, Subkey2]
     ),
     case Timeout of
@@ -319,7 +199,7 @@ cdt_del_batch_test(N, NKeys, NSKeys, TTL, Timeout) ->
     Subkey2 = erlang:iolist_to_binary([<<"Key_Key_Key_Key.subkey">>, integer_to_binary(rand:uniform(NSKeys))]),
     Subkey3 = erlang:iolist_to_binary([<<"Key_Key_Key_Key.subkey">>, integer_to_binary(rand:uniform(NSKeys))]),
     Subkey4 = erlang:iolist_to_binary([<<"Key_Key_Key_Key.subkey">>, integer_to_binary(rand:uniform(NSKeys))]),
-    aspike_nif:cdt_delete_by_keys_batch(
+    cdt_delete_by_keys_batch(
         <<"test">>, <<"gateway_fcap_test1">>, ?FCAP_BIN, [{Key1, [Subkey1, Subkey2]}, {Key2, [Subkey3, Subkey4]}]
     ),
     case Timeout of
@@ -331,7 +211,7 @@ cdt_del_batch_test(N, NKeys, NSKeys, TTL, Timeout) ->
 cdt_get_test(0, _, _, _) -> ok;
 cdt_get_test(N, NKeys, TTL, Timeout) ->
     Key = erlang:iolist_to_binary([<<"Key_Key_Key_Key.namespace.1111111">>, integer_to_binary(rand:uniform(NKeys))]),
-    aspike_nif:cdt_get(
+    cdt_get(
         <<"test">>, <<"gateway_fcap_test1">>, Key, {2, 1000, 30000, 1000}
     ),
     case Timeout of
@@ -348,7 +228,7 @@ cdt_insert_test(N, NKeys, NSKeys, TTL, Timeout) ->
     Bins = [
         {?FCAP_BIN, [Subkey, Value, erlang:system_time(seconds) + TTL]}
     ],
-    aspike_nif:cdt_put(
+    cdt_put(
         <<"test">>,
         <<"gateway_fcap_test1">>,
         Key,
@@ -379,7 +259,7 @@ cdt_insert_test_mk(N, NKeys, NSKeys, TTL, Timeout) ->
             Subkey3, Value3, erlang:system_time(seconds) + TTL
         ]}
     ],
-    aspike_nif:cdt_put(
+    cdt_put(
         <<"test">>,
         <<"gateway_fcap_test1">>,
         Key,
@@ -704,4 +584,3 @@ pool_cdt_read(N) ->
     Key = integer_to_binary(N),
     aspike_srv_worker:cdt_get(<<"test">>, <<"rtb-gateway-fcap-users2">>, Key),
     pool_cdt_read(N - 1).
-

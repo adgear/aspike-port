@@ -26,3 +26,4 @@ rebar.lock
 tmp/
 
 CLAUDE.md
+debug_gdb.sh

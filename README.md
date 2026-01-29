@@ -68,12 +68,12 @@ application:set_env(aspike_port, psw, "").
 aspike_nif:as_init().
 aspike_nif:host_add().
 aspike_nif:connect().
-aspike_nif_perf:mp_insert(10, 10, 0).
+aspike_nif_test:mp_insert(10, 10, 0).
 ```
 
 TODO: define how to use these tests.
 ```
-rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_perf quick_test
+rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_test quick_test
 ```
 
 Next you can run very basic commands just to make sure the connection working and aerospike is able to
@@ -87,28 +87,28 @@ aspike_nif:cdt_get(<<"test">>, <<"rtb_setname">>, <<"user_defined_PK">>).
 
 To run a single producer process:
 ```erlang
-aspike_nif_perf:sp_insert(<<"test">>, <<"rtb_setname">>, 1_000_000, 3600, 0, 1_000_000_000_000, 0, 0).
+aspike_nif_test:sp_insert(<<"test">>, <<"rtb_setname">>, 1_000_000, 3600, 0, 1_000_000_000_000, 0, 0).
 ```
 it will insert 1_000_000 keys to namespace=test, set=rtb_setname. Data TTL=3600 seconds. Delay between operations = 0ms. Initial key value = 1_000_000_000_000. (key will be 1_000_001_000_000 ... 1_000_001_999_999).
 Function will return: {Number_of_success_operations, Number_of_errors}.
 
 To run a single consumer process:
 ```erlang
-aspike_nif_perf:sp_read(<<"test">>, <<"rtb_setname">>, 1_000_000, 0, 1_000_000_000_000, 0, 0, 0).
+aspike_nif_test:sp_read(<<"test">>, <<"rtb_setname">>, 1_000_000, 0, 1_000_000_000_000, 0, 0, 0).
 ```
 it will read from namespace=test, set=rtb_setname. Delay between operations = 0ms. Initial key value = 1_000_000_000_000. (key will be 1_000_001_000_000 ... 1_000_001_999_999).
 
 To get the raw stats:
 ```erlang
-aspike_nif_perf:dump_stats().
+aspike_nif_test:dump_stats().
 ```
 it will produce 2 files: /tmp/read_stats.txt and /tmp/insert_stats.txt
 
 ### Multi-process tests
 
 ```erlang
-aspike_nif_perf:mp_insert(40, 1_000_000, 0).
-aspike_nif_perf:mp_reads(40, 1_000_000, 0).
+aspike_nif_test:mp_insert(40, 1_000_000, 0).
+aspike_nif_test:mp_reads(40, 1_000_000, 0).
 ```
 
 It will run 10 concurrent insert processes, each will insert 1000000 keys, with 0ms delay
