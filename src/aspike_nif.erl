@@ -228,7 +228,7 @@ cdt_put_sync(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
 -spec cdt_put_async(binary(), binary(), binary(),
     [{binary(), binary()|integer()|[integer()]}], integer(),
     {integer(), integer(), integer(), integer()}) ->
-    {ok, string()} | {error, string()}.
+    {ok, string() | atom()} | {error, {integer(), integer(), string()}}.
 cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 
@@ -236,7 +236,7 @@ cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
 cdt_get_sync(_Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
 
--spec cdt_get_async(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
+-spec cdt_get_async(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
 cdt_get_async(_Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
 
