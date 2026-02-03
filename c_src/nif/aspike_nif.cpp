@@ -417,7 +417,7 @@ static ERL_NIF_TERM aspike_nif_get_lowest_available_connection(ErlNifEnv* env, i
 
         for (uint32_t loop_idx = 0; loop_idx < EVENT_LOOPS_AMOUNT; loop_idx++) {
             as_async_conn_pool* pool = &node->async_conn_pools[loop_idx];
-            // to understand next formula you hav to understand units of connections to node:
+            // to understand the formula for available you have to understand units of connections to node:
             // |------------------*------------------*------------------|
             // 0                 used               total              limit
             // so the limit is the total amount of connections, basically defined as CONNECTIONS_PER_NODE.
