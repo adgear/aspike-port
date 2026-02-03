@@ -30,7 +30,8 @@ stress_test_loop(TestName, _, _, []) ->
             {ok, FileDesc} = file:open(FileName, [write]),
             file:write(FileDesc, JSON),
             file:close(FileDesc),
-            io:format("Saved results to file: ~s~n", [FileName])
+            io:format("Saved results to file: ~s~n", [FileName]),
+            collector ! clear_stats
     end;
 
 stress_test_loop(TestName, ActionFunc, AmountOfRequests, [AmountOfClients | Tail]) ->
@@ -123,7 +124,9 @@ collector_loop() ->
                     io:format("Collector: Received unknown version from a message: ~p~n", [Version])
             end;
         send_stats ->
-            stress_tester ! {ok, erlang:get(collector_stats)}
+            stress_tester ! {ok, erlang:get(collector_stats)};
+        clear_stats ->
+            collector_reset_stats()
     end,
 
     CurrentStats = erlang:get(collector_stats),

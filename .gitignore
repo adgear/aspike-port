@@ -27,3 +27,4 @@ tmp/
 
 CLAUDE.md
 debug_gdb.sh
+*.json

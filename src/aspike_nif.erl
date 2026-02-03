@@ -16,6 +16,8 @@
     host_list/0,
     connect/0,
     connect/2,
+    get_connection_stats/0,
+    get_lowest_available_connection/0,
     key_exists/0,
     key_exists/1,
     key_exists/3,
@@ -72,6 +74,8 @@
     host_clear/0,
     nif_host_list/0,
     connect/2,
+    get_connection_stats/0,
+    get_lowest_available_connection/0,
     key_exists/3,
     key_inc/4,
     key_get/3,
@@ -166,6 +170,14 @@ connect() ->
 % @doc Create connection using User and PWd credential
 -spec connect(string(), string()) -> {ok, string()} | {error, string()}.
 connect(_, _) ->
+    not_loaded(?LINE).
+
+-spec get_connection_stats() -> {ok, [{integer(),integer(),integer(),integer(),integer(),integer()}]} | {error, string()}.
+get_connection_stats() ->
+    not_loaded(?LINE).
+
+-spec get_lowest_available_connection() -> {ok, integer()} | {error, string()}.
+get_lowest_available_connection() ->
     not_loaded(?LINE).
 
 key_exists() ->

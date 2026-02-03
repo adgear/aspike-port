@@ -36,6 +36,7 @@
     pool_cdt_read/1
 ]).
 
+-define(INIT_FLAG, aspike_nif_test_init_done).
 -define(FCAP_BIN, <<"fcap_map">>).
 -define(ASPIKE_DEFAULT_POLICY, {3, 250, 30000, 1000}).
 
@@ -43,8 +44,8 @@
 get_api_mode(_Operation) -> async.
 
 init() ->
-    case erlang:get(init_done) of
-        undefined ->
+    case persistent_term:get(?INIT_FLAG, false) of
+        false ->
             application:set_env(aspike_port, host, "127.0.0.1"),
             application:set_env(aspike_port, port, 3000),
             application:set_env(aspike_port, user, ""),
@@ -52,7 +53,8 @@ init() ->
             aspike_nif:as_init(),
             aspike_nif:host_add(),
             io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]),
-            erlang:put(init_done, true);
+            persistent_term:put(?INIT_FLAG, true),
+            ok;
         _ -> ok
     end.
 
@@ -85,13 +87,22 @@ quick_test() ->
 
 stress_test() ->
     init(),
+    case whereis(stress_tester) of
+        undefined -> ok;
+        _ -> unregister(stress_tester)
+    end,
     register(stress_tester, self()),
-    register(collector, spawn_link(fun() -> aspike_nif_test_utils:collector_start() end)),
+
+    case whereis(collector) of
+        undefined ->
+            register(collector, spawn_link(fun() -> aspike_nif_test_utils:collector_start() end));
+        _ -> ok
+    end,
 
     TestNamePrefix = "local",
     AmountOfRequests = 10_000,
-    %Command = cdt_put,
-    Command = cdt_get,
+    Command = cdt_put,
+    %Command = cdt_get,
     %AmountOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
     AmountOfClients = [10],
 
