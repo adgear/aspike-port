@@ -4,6 +4,7 @@
     init/0,
     quick_test/0,
     stress_test/0,
+    memory_leak_test/0,
     get_api_mode/1,
 
     sp_insert/9,
@@ -85,19 +86,22 @@ quick_test() ->
             io:format("Read error happened: ~p.~n", [Error])
     end.
 
-stress_test() ->
-    init(),
-    case whereis(stress_tester) of
+init_tester() ->
+    case whereis(tester) of
         undefined -> ok;
-        _ -> unregister(stress_tester)
+        _ -> unregister(tester)
     end,
-    register(stress_tester, self()),
+    register(tester, self()),
 
     case whereis(collector) of
         undefined ->
             register(collector, spawn_link(fun() -> aspike_nif_test_utils:collector_start() end));
         _ -> ok
-    end,
+    end.
+
+stress_test() ->
+    init(),
+    init_tester(),
 
     TestNamePrefix = "local",
     AmountOfRequests = 10_000,
@@ -141,7 +145,45 @@ stress_test() ->
     ModeAtom = get_api_mode(default),
     TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfRequests),
 
-    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfRequests, AmountOfClients).
+    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfRequests, AmountOfClients),
+    ok.
+
+memory_leak_test() ->
+    init(),
+    init_tester(),
+
+    AmountOfRequests = 100_000_000,
+    AmountOfClients = 50,
+
+    Namespace = <<"test">>,
+    SetName = <<"test_set">>,
+    ActionFunc = fun(Counter) ->
+        RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
+        MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
+        Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
+        Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
+        Bins = [{MapKey1, [Value1, Value2, Counter]}],
+        TTL = 60 * 60,
+        cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, ?ASPIKE_DEFAULT_POLICY),
+
+        Result = cdt_get(Namespace, SetName, RecordKeyName, ?ASPIKE_DEFAULT_POLICY),
+
+        % now we do some validation
+        case Result of
+            {error, _} -> Result;
+            {ok, Data} ->
+                MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
+                case Data of
+                    [{MapKey1, [Value1, {Value2, _,_}]}] -> Result;
+                    _ -> {error, <<"cdt_get() doesn't match data put by cdt_put()">>}
+                end
+        end
+     end,
+
+    aspike_nif_test_utils:memory_leak_test(ActionFunc, AmountOfRequests, AmountOfClients),
+    ok.
 
 cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
     case get_api_mode(cdt_put) of
@@ -172,6 +214,11 @@ cdt_delete_by_keys_batch(Namespace, Set, BinName, KeysSubkeysList) ->
     aspike_nif:cdt_delete_by_keys_batch(Namespace, Set, BinName, KeysSubkeysList).
 
 call_aerospike_async_nif(AsyncCmd) ->
+
+    % we define time to wait (TTW) much higher compare to prod values
+    % because dev machines are not so powerful. Value in milliseconds.
+    TTW = 1000,
+
     case AsyncCmd() of
         {ok, in_progress} ->
             receive
@@ -179,7 +226,7 @@ call_aerospike_async_nif(AsyncCmd) ->
                     {ok, Response};
                 {error, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} ->
                     {error, ErrorMessage}
-            after 100 ->
+            after TTW ->
                 {error, <<"timeout waiting for the response from aerospike">>}
             end;
         {ok, Response} ->

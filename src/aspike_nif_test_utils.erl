@@ -3,6 +3,7 @@
 %% API
 -export([
     stress_test_loop/4,
+    memory_leak_test/3,
     collector_start/0,
     compare_cdt_data/2
 ]).
@@ -12,9 +13,9 @@ stress_test_loop(TestName, _, _, []) ->
     receive
         {ok, Stats} ->
             %io:format("~nStats: ~p~n~n", [Stats]),
-            ChartSeries = maps:get(chart_series, Stats),
+            StatByMode = maps:get(by_mode, Stats),
             ModeAtom = aspike_nif_test:get_api_mode(default),
-            SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
+            DataOfThisMode = maps:get(ModeAtom, StatByMode),
             JSON = lists:join("", [
                 "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
                 lists:join(", ", lists:map(fun(Data) ->
@@ -22,7 +23,7 @@ stress_test_loop(TestName, _, _, []) ->
                     io_lib:format("{\"clients\": ~p, \"amountOfOps\": ~p, \"min\": ~p, \"max\": ~p, \"avg\": ~p, \"done\": ~p, \"failed\": ~p}",
                         [AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet]
                     )
-                end, SeriesOfThisMode)),
+                end, DataOfThisMode)),
                 "]}"
             ]),
             io:format("JSON: ~s~n", [JSON]),
@@ -55,9 +56,9 @@ stress_test_runner(AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
             StartTime = erlang:system_time(microsecond),
             Results = stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
             EndTime = erlang:system_time(microsecond),
-            TimePerInsert = (EndTime - StartTime) div AmountOfOpsToDo,
+            TimePerAction = (EndTime - StartTime) div AmountOfOpsToDo,
             {OpsDone, ErrorsMet} = Results,
-            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerInsert}}}
+            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerAction}}}
         end)
     end, lists:seq(1, AmountOfClients)).
 
@@ -75,6 +76,58 @@ stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Err
 
     stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo - 1, Counter + 1, OpsDone, ErrorsMet).
 
+memory_leak_test(ActionFunc, AmountOfRequests, AmountOfClients) ->
+    collector ! {test_starts, AmountOfClients},
+    receive
+        collector_ack -> ok
+    end,
+    memory_leak_test_runner(AmountOfClients, ActionFunc, AmountOfRequests),
+    receive
+        collection_done -> ok
+    end,
+    collector ! send_stats,
+    receive
+        {ok, Stats} ->
+            StatByMode = maps:get(by_mode, Stats),
+            ModeAtom = aspike_nif_test:get_api_mode(default),
+            DataOfThisMode = maps:get(ModeAtom, StatByMode),
+            [{_, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet}] = DataOfThisMode,
+            io:format("Clients: ~p, amountOfOps: ~p, min: ~p, max: ~p, avg: ~p, done: ~p, failed: ~p}",
+                [AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet]
+            ),
+            collector ! clear_stats
+    end.
+
+memory_leak_test_runner(AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
+    ModeAtom = aspike_nif_test:get_api_mode(default),
+    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
+    lists:map(fun(ProcNumber) ->
+        spawn(fun() ->
+            Counter = AmountOfOpsToDo * ProcNumber,
+            ProcName = integer_to_list(ProcNumber),
+            StartTime = erlang:system_time(microsecond),
+            Results = memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
+            EndTime = erlang:system_time(microsecond),
+            TimePerAction = (EndTime - StartTime) div AmountOfOpsToDo,
+            {OpsDone, ErrorsMet} = Results,
+            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerAction}}}
+        end)
+    end, lists:seq(1, AmountOfClients)).
+
+memory_leak_test_runner_loop(_, _, 0, _, Oks, Errs) -> {Oks, Errs};
+
+memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Errs) ->
+    Result = ActionFunc(Counter),
+
+    {OpsDone, ErrorsMet} = case Result of
+        {ok, _} -> {Oks + 1, Errs};
+        {error, _ErrorMessage} ->
+            %io:format("~s: got error: ~s~n", [ProcName, ErrorMessage]),
+            {Oks, Errs + 1}
+    end,
+
+    memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo - 1, Counter + 1, OpsDone, ErrorsMet).
+
 collector_start() ->
     collector_reset_stats(),
     collector_loop().
@@ -85,7 +138,7 @@ collector_reset_stats() ->
         results_received => 0,
         results_expected => 0,
         by_clients => #{},
-        chart_series => #{
+        by_mode => #{
             async => [],
             sync => []
         }
@@ -100,7 +153,7 @@ collector_loop() ->
                 results_received => 0,
                 status => collecting
             })),
-            stress_tester ! collector_ack;
+            tester ! collector_ack;
         {load_finished, Data} ->
             {Version, Results} = Data,
             case Version of
@@ -124,7 +177,7 @@ collector_loop() ->
                     io:format("Collector: Received unknown version from a message: ~p~n", [Version])
             end;
         send_stats ->
-            stress_tester ! {ok, erlang:get(collector_stats)};
+            tester ! {ok, erlang:get(collector_stats)};
         clear_stats ->
             collector_reset_stats()
     end,
@@ -179,17 +232,17 @@ collector_process_results(Stats) ->
     io:format("Total successful ops: ~p, Total failed ops: ~p (~p % from total)~n", [OpsDone, ErrorsMet, PercentOfFailed]),
 
     Stats = erlang:get(collector_stats),
-    ChartSeries = maps:get(chart_series, Stats),
+    StatByMode = maps:get(by_mode, Stats),
     ModeAtom = aspike_nif_test:get_api_mode(default),
-    SeriesOfThisMode = maps:get(ModeAtom, ChartSeries),
+    DataOfThisMode = maps:get(ModeAtom, StatByMode),
     erlang:put(collector_stats, maps:merge(Stats, #{
         status => done,
         %by_clients => #{},
-        chart_series => maps:merge(ChartSeries, #{
-            ModeAtom => lists:append(SeriesOfThisMode, [{AmountOfClients, OpsPerClient, Min, Max, Avg, OpsDone, ErrorsMet}])
+        by_mode => maps:merge(StatByMode, #{
+            ModeAtom => lists:append(DataOfThisMode, [{AmountOfClients, OpsPerClient, Min, Max, Avg, OpsDone, ErrorsMet}])
         })
     })),
-    stress_tester ! collection_done.
+    tester ! collection_done.
 
 %% @doc Compare insert data with read data from CDT operations
 %% Insert data contains tuples like {<<0,1,0,2,1>>,123,1769657419} with timestamps
