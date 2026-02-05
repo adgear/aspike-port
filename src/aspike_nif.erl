@@ -19,7 +19,7 @@
     connect/0,
     connect/2,
     get_connection_stats/0,
-    get_lowest_available_connection/0,
+    get_connection_saturation/0,
     key_exists/0,
     key_exists/1,
     key_exists/3,
@@ -79,7 +79,7 @@
     set_event_loops_amount/1,
     connect/2,
     get_connection_stats/0,
-    get_lowest_available_connection/0,
+    get_connection_saturation/0,
     key_exists/3,
     key_inc/4,
     key_get/3,
@@ -188,8 +188,8 @@ connect(_, _) ->
 get_connection_stats() ->
     not_loaded(?LINE).
 
--spec get_lowest_available_connection() -> {ok, integer()} | {error, string()}.
-get_lowest_available_connection() ->
+-spec get_connection_saturation() -> {ok, integer()} | {error, string()}.
+get_connection_saturation() ->
     not_loaded(?LINE).
 
 key_exists() ->

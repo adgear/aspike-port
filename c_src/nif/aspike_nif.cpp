@@ -1,6 +1,7 @@
 #include <erl_nif.h>
 
 #include <time.h>
+#include <math.h>
 #include <string>
 #include <utility>
 #include <iostream>
@@ -8,6 +9,7 @@
 #include <chrono>
 #include <functional>
 #include <assert.h>
+#include <atomic>
 
 #include <aerospike/aerospike.h>
 #include <aerospike/aerospike_info.h>
@@ -44,6 +46,10 @@ static ERL_NIF_TERM erl_error;
 static ERL_NIF_TERM erl_ok;
 
 static uint32_t event_loops_amount = 1;
+
+// Thread-safe counters for tracking parallel operations
+std::atomic<uint32_t> cdt_put_sync_counter(0);
+std::atomic<uint32_t> cdt_get_sync_counter(0);
 
 aerospike* get_aerospike () { return &as; }
 bool get_is_connected () { return is_connected; }
@@ -425,15 +431,28 @@ static ERL_NIF_TERM aspike_nif_get_connection_stats(ErlNifEnv* env, int argc, co
         }
     }
 
+    // Add sync operation counters to the result
+    uint32_t cdt_put_count = cdt_put_sync_counter.load();
+    uint32_t cdt_get_count = cdt_get_sync_counter.load();
+
+    ERL_NIF_TERM sync_counters = enif_make_tuple3(env,
+        enif_make_atom(env, "sync_counters"),
+        enif_make_int(env, cdt_put_count),
+        enif_make_int(env, cdt_get_count)
+    );
+
+    result_list = enif_make_list_cell(env, sync_counters, result_list);
+
     return enif_make_tuple2(env, erl_ok, result_list);
 }
 
-static ERL_NIF_TERM aspike_nif_get_lowest_available_connection(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+static ERL_NIF_TERM aspike_nif_get_connection_saturation(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     if (!as.cluster || !as.cluster->nodes) {
         return enif_make_tuple2(env, erl_error, enif_make_string(env, "no_cluster", ERL_NIF_UTF8));
     }
 
-    int min_available = as.config.async_max_conns_per_node;
+    uint32_t all_conns = 0;
+    uint32_t used_conns = 0;
 
     for (uint32_t i = 0; i < as.cluster->nodes->size; i++) {
         as_node* node = as.cluster->nodes->array[i];
@@ -448,16 +467,18 @@ static ERL_NIF_TERM aspike_nif_get_lowest_available_connection(ErlNifEnv* env, i
             // the 'in use' is amount of connections being used.
             // Of course, usually available would equal to "total - used", but in aerospike C-client
             // there is another way to calculate available amount: you just call as_queue_size().
-            // Now, that will give you the available from total connections. Now you have to add the difference
-            // between limit and total, and this is what we do below:
-            uint32_t total = pool->queue.total;
-            uint32_t available_from_total = as_queue_size(&pool->queue);
-            uint32_t available = (pool->limit - total) + available_from_total;
-            min_available = (int)available < min_available ? (int)available : min_available;
+            // Now, that will give you the available from total connections. Now if you want to get all available
+            // connections you have to add the difference between limit and total.
+            // But in this case we just need a used amount, no more:
+            all_conns += pool->limit;
+            auto available_from_total = as_queue_size(&pool->queue);
+            used_conns += pool->queue.total - available_from_total;
         }
     }
 
-    auto erl_min_available = enif_make_int(env, min_available);
+    int saturation = ceil(((float)used_conns / all_conns) * 100);
+
+    auto erl_min_available = enif_make_int(env, saturation);
     return enif_make_tuple2(env, erl_ok, erl_min_available);
 }
 
@@ -478,7 +499,7 @@ static ErlNifFunc nif_funcs[] = {
     NIF_DIRTY_FUN("nif_help", 1, aspike_nif_help),
     NIF_DIRTY_FUN("nif_host_info", 3, aspike_nif_host_info),
     {"get_connection_stats", 0, aspike_nif_get_connection_stats},
-    {"get_lowest_available_connection", 0, aspike_nif_get_lowest_available_connection},
+    {"get_connection_saturation", 0, aspike_nif_get_connection_saturation},
 
     NIF_DIRTY_FUN("cdt_put_sync", 6, aspike_nif_cdt_put_sync),
     {"cdt_put_async", 6, aspike_nif_cdt_put_async},

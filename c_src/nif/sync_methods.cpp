@@ -24,6 +24,7 @@
 #include <erl_nif.h>
 #include <time.h>
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <iostream>
@@ -35,7 +36,33 @@
 #include "common_methods.h"
 #include "sync_methods.h"
 
+// External references to atomic counters
+extern std::atomic<uint32_t> cdt_put_sync_counter;
+extern std::atomic<uint32_t> cdt_get_sync_counter;
+
+// RAII helper for automatically managing sync operation counters
+class SyncOperationCounter {
+private:
+    std::atomic<uint32_t>* counter;
+
+public:
+    explicit SyncOperationCounter(std::atomic<uint32_t>* cnt) : counter(cnt) {
+        counter->fetch_add(1);
+    }
+
+    ~SyncOperationCounter() {
+        counter->fetch_sub(1);
+    }
+
+    // Disable copy constructor and assignment operator
+    SyncOperationCounter(const SyncOperationCounter&) = delete;
+    SyncOperationCounter& operator=(const SyncOperationCounter&) = delete;
+};
+
 ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    // Automatically track parallel operations
+    //SyncOperationCounter counter(&cdt_put_sync_counter);
+
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
@@ -222,6 +249,9 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 }
 
 ERL_NIF_TERM aspike_nif_cdt_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    // Automatically track parallel operations
+    //SyncOperationCounter counter(&cdt_get_sync_counter);
+
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
