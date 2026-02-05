@@ -14,6 +14,8 @@
     host_info/1,
     host_info/3,
     host_list/0,
+    set_connections_per_node/4,
+    set_event_loops_amount/1,
     connect/0,
     connect/2,
     get_connection_stats/0,
@@ -73,6 +75,8 @@
     nif_host_add/2,
     host_clear/0,
     nif_host_list/0,
+    set_connections_per_node/4,
+    set_event_loops_amount/1,
     connect/2,
     get_connection_stats/0,
     get_lowest_available_connection/0,
@@ -162,6 +166,14 @@ host_list() ->
     as_render:hosts_render(nif_host_list()).
 
 nif_host_list() ->
+    not_loaded(?LINE).
+
+-spec set_connections_per_node(integer(), integer(), integer(), integer()) -> {ok, string()} | {error, string()}.
+set_connections_per_node(_SyncMinConn, _SyncMaxConn, _AsyncMinConn, _AsyncMaxConn) ->
+    not_loaded(?LINE).
+
+-spec set_event_loops_amount(integer()) -> {ok, string()} | {error, string()}.
+set_event_loops_amount(_EventLoopsAmount) ->
     not_loaded(?LINE).
 
 connect() ->

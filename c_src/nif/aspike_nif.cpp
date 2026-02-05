@@ -37,23 +37,15 @@
 #include "sync_methods.h"
 #include "async_methods.h"
 
-// #define CLOCK_REALTIME 0 
-// #define CLOCK_MONOTONIC 6 
-// #define CLOCK_PROCESS_CPUTIME_ID  12 
-// #define CLOCK_THREAD_CPUTIME_ID  16 
-
 static aerospike as;
-static as_config config;
 static as_monitor app_complete_monitor;
-static bool is_aerospike_initialised = false;
 static bool is_connected = false;
 static ERL_NIF_TERM erl_error;
 static ERL_NIF_TERM erl_ok;
-static uint32_t CONNECTIONS_PER_NODE = 100;
-static uint32_t EVENT_LOOPS_AMOUNT = 1;
+
+static uint32_t event_loops_amount = 1;
 
 aerospike* get_aerospike () { return &as; }
-bool get_is_aerospike_initialised () { return is_aerospike_initialised; }
 bool get_is_connected () { return is_connected; }
 ERL_NIF_TERM get_erl_error () { return erl_error; }
 ERL_NIF_TERM get_erl_ok () { return erl_ok; }
@@ -62,20 +54,58 @@ ERL_NIF_TERM get_erl_ok () { return erl_ok; }
 
 static int load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
-    as_config_init(&config);
+    aerospike_init(&as, NULL);
 
-    config.async_max_conns_per_node = CONNECTIONS_PER_NODE;
-
-    aerospike_init(&as, &config);
     erl_error = enif_make_atom(env, "error");
     erl_ok = enif_make_atom(env, "ok");
-    is_aerospike_initialised = true;
+
     return 0;
+}
+
+static ERL_NIF_TERM aspike_nif_set_connections_per_node(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    int sync_min_amount;
+    int sync_max_amount;
+    int async_min_amount;
+    int async_max_amount;
+    if (!enif_get_int(env, argv[0], &sync_min_amount)) {
+	    return enif_make_badarg(env);
+    }
+    if (!enif_get_int(env, argv[1], &sync_max_amount)) {
+	    return enif_make_badarg(env);
+    }
+    if (!enif_get_int(env, argv[2], &async_min_amount)) {
+	    return enif_make_badarg(env);
+    }
+    if (!enif_get_int(env, argv[3], &async_max_amount)) {
+	    return enif_make_badarg(env);
+    }
+
+    as.config.min_conns_per_node = sync_min_amount;
+    as.config.max_conns_per_node = sync_max_amount;
+    as.config.async_min_conns_per_node = async_min_amount;
+    as.config.async_max_conns_per_node = async_max_amount;
+
+    ERL_NIF_TERM msg = enif_make_string(env, "set", ERL_NIF_UTF8);
+    return enif_make_tuple2(env, erl_ok, msg);
+}
+
+static ERL_NIF_TERM aspike_nif_set_event_loops_amount(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    int ev_amount;
+    if (!enif_get_int(env, argv[0], &ev_amount)) {
+	    return enif_make_badarg(env);
+    }
+
+    event_loops_amount = ev_amount;
+
+    ERL_NIF_TERM msg = enif_make_string(env, "set", ERL_NIF_UTF8);
+    return enif_make_tuple2(env, erl_ok, msg);
 }
 
 static ERL_NIF_TERM aspike_nif_as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-    if (!as_event_create_loops(EVENT_LOOPS_AMOUNT)) {
+    if (!as_event_create_loops(event_loops_amount)) {
         ERL_NIF_TERM msg = enif_make_string(env, "Failed to create event loop", ERL_NIF_UTF8);
         return enif_make_tuple2(env, erl_error, msg);
     }
@@ -94,7 +124,6 @@ static ERL_NIF_TERM aspike_nif_host_add(ErlNifEnv* env, int argc, const ERL_NIF_
     if (!enif_get_int(env, argv[1], &port)) {
 	    return enif_make_badarg(env);
     }
-    CHECK_INIT
 
     ERL_NIF_TERM rc, msg;
 
@@ -111,8 +140,6 @@ static ERL_NIF_TERM aspike_nif_host_add(ErlNifEnv* env, int argc, const ERL_NIF_
 
 static ERL_NIF_TERM aspike_nif_host_clear(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-    CHECK_INIT
-
     as_config_clear_hosts(&(as.config));
     ERL_NIF_TERM rc = erl_ok;
     ERL_NIF_TERM msg = enif_make_string(env, "hosts list was cleared", ERL_NIF_UTF8);
@@ -121,10 +148,8 @@ static ERL_NIF_TERM aspike_nif_host_clear(ErlNifEnv* env, int argc, const ERL_NI
 
 static ERL_NIF_TERM aspike_nif_host_list(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-    CHECK_INIT
-
-    as_config  *config = &(as.config);
-    as_vector  *hosts = config->hosts;
+    as_config *config = &(as.config);
+    as_vector *hosts = config->hosts;
     uint32_t size = (hosts == NULL) ? 0 : hosts->size;
 
     ERL_NIF_TERM msg = enif_make_list(env, 0);
@@ -153,8 +178,6 @@ static ERL_NIF_TERM aspike_nif_connect_sync(ErlNifEnv* env, int argc, const ERL_
     if (!enif_get_string(env, argv[1], password, AS_PASSWORD_SIZE, ERL_NIF_UTF8)) {
 	    return enif_make_badarg(env);
     }
-    
-    CHECK_AEROSPIKE_INIT
 
     ERL_NIF_TERM msg;
     as_config_set_user(&(as.config), user, password);
@@ -381,19 +404,19 @@ static ERL_NIF_TERM aspike_nif_get_connection_stats(ErlNifEnv* env, int argc, co
     for (uint32_t i = 0; i < as.cluster->nodes->size; i++) {
         as_node* node = as.cluster->nodes->array[i];
 
-        for (uint32_t loop_idx = 0; loop_idx < EVENT_LOOPS_AMOUNT; loop_idx++) {
+        for (uint32_t loop_idx = 0; loop_idx < event_loops_amount; loop_idx++) {
             as_async_conn_pool* pool = &node->async_conn_pools[loop_idx];
 
             uint32_t total = pool->queue.total;
             uint32_t available = as_queue_size(&pool->queue);
-            uint32_t used = total - available;
+            uint32_t inUse = total - available;
 
-            // Create tuple: {node_index, loop_index, total, used, available, limit}
+            // Create tuple: {node_index, loop_index, total, inUse, available, limit}
             ERL_NIF_TERM pool_info = enif_make_tuple6(env,
                 enif_make_int(env, i),
                 enif_make_int(env, loop_idx),
                 enif_make_int(env, total),
-                enif_make_int(env, used),
+                enif_make_int(env, inUse),
                 enif_make_int(env, available),
                 enif_make_int(env, pool->limit)
             );
@@ -410,19 +433,19 @@ static ERL_NIF_TERM aspike_nif_get_lowest_available_connection(ErlNifEnv* env, i
         return enif_make_tuple2(env, erl_error, enif_make_string(env, "no_cluster", ERL_NIF_UTF8));
     }
 
-    int min_available = CONNECTIONS_PER_NODE;
+    int min_available = as.config.async_max_conns_per_node;
 
     for (uint32_t i = 0; i < as.cluster->nodes->size; i++) {
         as_node* node = as.cluster->nodes->array[i];
 
-        for (uint32_t loop_idx = 0; loop_idx < EVENT_LOOPS_AMOUNT; loop_idx++) {
+        for (uint32_t loop_idx = 0; loop_idx < event_loops_amount; loop_idx++) {
             as_async_conn_pool* pool = &node->async_conn_pools[loop_idx];
             // to understand the formula for available you have to understand units of connections to node:
             // |------------------*------------------*------------------|
-            // 0                 used               total              limit
-            // so the limit is the total amount of connections, basically defined as CONNECTIONS_PER_NODE.
+            // 0               in use            total(78)         limit (300)
+            // so the limit is the total amount of connections, basically defined as config.async_max_conns_per_node.
             // The total is the current total connections created (established) to that node, and
-            // the used is amount of connections being used.
+            // the 'in use' is amount of connections being used.
             // Of course, usually available would equal to "total - used", but in aerospike C-client
             // there is another way to calculate available amount: you just call as_queue_size().
             // Now, that will give you the available from total connections. Now you have to add the difference
@@ -441,6 +464,8 @@ static ERL_NIF_TERM aspike_nif_get_lowest_available_connection(ErlNifEnv* env, i
 #define NIF_DIRTY_FUN(A, B, C) {A, B, C, ERL_DIRTY_JOB_IO_BOUND}
 static ErlNifFunc nif_funcs[] = {
 
+    {"set_connections_per_node", 4, aspike_nif_set_connections_per_node},
+    {"set_event_loops_amount", 1, aspike_nif_set_event_loops_amount},
     {"as_init", 0, aspike_nif_as_init},
     {"nif_host_add", 2, aspike_nif_host_add},
     {"host_clear", 0, aspike_nif_host_clear},

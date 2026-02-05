@@ -41,6 +41,12 @@
 -define(FCAP_BIN, <<"fcap_map">>).
 -define(ASPIKE_DEFAULT_POLICY, {3, 250, 30000, 1000}).
 
+-define(SYNC_MIN_CONNECTION, 50).
+-define(SYNC_MAX_CONNECTION, 100).
+-define(ASYNC_MIN_CONNECTION, 50).
+-define(ASYNC_MAX_CONNECTION, 300).
+-define(EVENT_LOOPS_AMOUNT, 1).
+
 %get_api_mode(_Operation) -> sync.
 get_api_mode(_Operation) -> async.
 
@@ -51,8 +57,15 @@ init() ->
             application:set_env(aspike_port, port, 3000),
             application:set_env(aspike_port, user, ""),
             application:set_env(aspike_port, psw, ""),
-            aspike_nif:as_init(),
+            aspike_nif:set_connections_per_node(
+                ?SYNC_MIN_CONNECTION,
+                ?SYNC_MAX_CONNECTION,
+                ?ASYNC_MIN_CONNECTION,
+                ?ASYNC_MAX_CONNECTION
+            ),
+            aspike_nif:set_event_loops_amount(?EVENT_LOOPS_AMOUNT),
             aspike_nif:host_add(),
+            aspike_nif:as_init(),
             io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]),
             persistent_term:put(?INIT_FLAG, true),
             ok;

@@ -98,7 +98,6 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 
 ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
-    bool is_aerospike_initialised = get_is_aerospike_initialised();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM erl_ok = get_erl_ok();
@@ -466,7 +465,6 @@ static void cdt_get_async_callback(as_error* err, as_record* record, void* udata
 
 ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
-    bool is_aerospike_initialised = get_is_aerospike_initialised();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM erl_ok = get_erl_ok();
