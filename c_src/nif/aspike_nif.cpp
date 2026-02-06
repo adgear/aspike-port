@@ -39,6 +39,8 @@
 #include "sync_methods.h"
 #include "async_methods.h"
 
+using namespace std;
+
 static aerospike as;
 static as_monitor app_complete_monitor;
 static bool is_connected = false;
@@ -47,9 +49,12 @@ static ERL_NIF_TERM erl_ok;
 
 static uint32_t event_loops_amount = 1;
 
-// Thread-safe counters for tracking parallel operations
-std::atomic<uint32_t> cdt_put_sync_counter(0);
-std::atomic<uint32_t> cdt_get_sync_counter(0);
+atomic<uint32_t> sync_current_counter(0);
+atomic<uint32_t> sync_peak_counter(0);
+atomic<int64_t> sync_peak_ttl_counter(0);
+atomic<uint32_t> async_current_counter(0);
+atomic<uint32_t> async_peak_counter(0);
+atomic<int64_t> async_peak_ttl_counter(0);
 
 aerospike* get_aerospike () { return &as; }
 bool get_is_connected () { return is_connected; }
@@ -400,86 +405,29 @@ static ERL_NIF_TERM aspike_nif_host_info(ErlNifEnv* env, int argc, const ERL_NIF
     return enif_make_tuple2(env, rc, msg);
 }
 
-static ERL_NIF_TERM aspike_nif_get_connection_stats(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    if (!as.cluster || !as.cluster->nodes) {
-        return enif_make_tuple2(env, erl_error, enif_make_string(env, "no_cluster", ERL_NIF_UTF8));
+static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+
+    uint32_t sync_current = sync_current_counter.load();
+    uint32_t sync_peak = sync_peak_counter.load();
+    uint32_t total_sync_connections = 0;
+    uint32_t async_current = async_current_counter.load();
+    uint32_t async_peak = async_peak_counter.load();
+    uint32_t total_async_connections = 0;
+    if (as.cluster && as.cluster->nodes) {
+        total_sync_connections = as.cluster->nodes->size * as.config.max_conns_per_node;
+        total_async_connections = as.cluster->nodes->size * as.config.async_max_conns_per_node;
     }
 
-    ERL_NIF_TERM result_list = enif_make_list(env, 0);
-
-    for (uint32_t i = 0; i < as.cluster->nodes->size; i++) {
-        as_node* node = as.cluster->nodes->array[i];
-
-        for (uint32_t loop_idx = 0; loop_idx < event_loops_amount; loop_idx++) {
-            as_async_conn_pool* pool = &node->async_conn_pools[loop_idx];
-
-            uint32_t total = pool->queue.total;
-            uint32_t available = as_queue_size(&pool->queue);
-            uint32_t inUse = total - available;
-
-            // Create tuple: {node_index, loop_index, total, inUse, available, limit}
-            ERL_NIF_TERM pool_info = enif_make_tuple6(env,
-                enif_make_int(env, i),
-                enif_make_int(env, loop_idx),
-                enif_make_int(env, total),
-                enif_make_int(env, inUse),
-                enif_make_int(env, available),
-                enif_make_int(env, pool->limit)
-            );
-
-            result_list = enif_make_list_cell(env, pool_info, result_list);
-        }
-    }
-
-    // Add sync operation counters to the result
-    uint32_t cdt_put_count = cdt_put_sync_counter.load();
-    uint32_t cdt_get_count = cdt_get_sync_counter.load();
-
-    ERL_NIF_TERM sync_counters = enif_make_tuple3(env,
-        enif_make_atom(env, "sync_counters"),
-        enif_make_int(env, cdt_put_count),
-        enif_make_int(env, cdt_get_count)
+    ERL_NIF_TERM connections_stat = enif_make_tuple6(env,
+        enif_make_int(env, sync_current),
+        enif_make_int(env, sync_peak),
+        enif_make_int(env, total_sync_connections),
+        enif_make_int(env, async_current),
+        enif_make_int(env, async_peak),
+        enif_make_int(env, total_async_connections)
     );
 
-    result_list = enif_make_list_cell(env, sync_counters, result_list);
-
-    return enif_make_tuple2(env, erl_ok, result_list);
-}
-
-static ERL_NIF_TERM aspike_nif_get_connection_saturation(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    if (!as.cluster || !as.cluster->nodes) {
-        return enif_make_tuple2(env, erl_error, enif_make_string(env, "no_cluster", ERL_NIF_UTF8));
-    }
-
-    uint32_t all_conns = 0;
-    uint32_t used_conns = 0;
-
-    for (uint32_t i = 0; i < as.cluster->nodes->size; i++) {
-        as_node* node = as.cluster->nodes->array[i];
-
-        for (uint32_t loop_idx = 0; loop_idx < event_loops_amount; loop_idx++) {
-            as_async_conn_pool* pool = &node->async_conn_pools[loop_idx];
-            // to understand the formula for available you have to understand units of connections to node:
-            // |------------------*------------------*------------------|
-            // 0               in use            total(78)         limit (300)
-            // so the limit is the total amount of connections, basically defined as config.async_max_conns_per_node.
-            // The total is the current total connections created (established) to that node, and
-            // the 'in use' is amount of connections being used.
-            // Of course, usually available would equal to "total - used", but in aerospike C-client
-            // there is another way to calculate available amount: you just call as_queue_size().
-            // Now, that will give you the available from total connections. Now if you want to get all available
-            // connections you have to add the difference between limit and total.
-            // But in this case we just need a used amount, no more:
-            all_conns += pool->limit;
-            auto available_from_total = as_queue_size(&pool->queue);
-            used_conns += pool->queue.total - available_from_total;
-        }
-    }
-
-    int saturation = ceil(((float)used_conns / all_conns) * 100);
-
-    auto erl_min_available = enif_make_int(env, saturation);
-    return enif_make_tuple2(env, erl_ok, erl_min_available);
+    return enif_make_tuple2(env, erl_ok, connections_stat);
 }
 
 #define NIF_DIRTY_FUN(A, B, C) {A, B, C, ERL_DIRTY_JOB_IO_BOUND}
@@ -498,8 +446,7 @@ static ErlNifFunc nif_funcs[] = {
     NIF_DIRTY_FUN("nif_node_info", 2, aspike_nif_node_info),
     NIF_DIRTY_FUN("nif_help", 1, aspike_nif_help),
     NIF_DIRTY_FUN("nif_host_info", 3, aspike_nif_host_info),
-    {"get_connection_stats", 0, aspike_nif_get_connection_stats},
-    {"get_connection_saturation", 0, aspike_nif_get_connection_saturation},
+    {"get_connections_stats", 0, aspike_nif_get_connections_stats},
 
     NIF_DIRTY_FUN("cdt_put_sync", 6, aspike_nif_cdt_put_sync),
     {"cdt_put_async", 6, aspike_nif_cdt_put_async},

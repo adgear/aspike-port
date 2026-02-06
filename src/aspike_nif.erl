@@ -18,8 +18,7 @@
     set_event_loops_amount/1,
     connect/0,
     connect/2,
-    get_connection_stats/0,
-    get_connection_saturation/0,
+    get_connections_stats/0,
     key_exists/0,
     key_exists/1,
     key_exists/3,
@@ -78,8 +77,7 @@
     set_connections_per_node/4,
     set_event_loops_amount/1,
     connect/2,
-    get_connection_stats/0,
-    get_connection_saturation/0,
+    get_connections_stats/0,
     key_exists/3,
     key_inc/4,
     key_get/3,
@@ -184,12 +182,8 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
--spec get_connection_stats() -> {ok, [{integer(),integer(),integer(),integer(),integer(),integer()}]} | {error, string()}.
-get_connection_stats() ->
-    not_loaded(?LINE).
-
--spec get_connection_saturation() -> {ok, integer()} | {error, string()}.
-get_connection_saturation() ->
+-spec get_connections_stats() -> {ok, {integer(),integer(),integer(),integer(),integer(),integer()}} | {error, string()}.
+get_connections_stats() ->
     not_loaded(?LINE).
 
 key_exists() ->

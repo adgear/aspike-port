@@ -34,6 +34,14 @@
 #include "aspike_nif.h"
 #include "common_methods.h"
 
+using namespace std;
+
+int64_t unix_ts() {
+    return chrono::duration_cast<chrono::seconds>(
+        chrono::system_clock::now().time_since_epoch()
+    ).count();
+}
+
 ERL_NIF_TERM aspike_dump_records(ErlNifEnv* env, const as_record* p_rec) {
     ERL_NIF_TERM res;
 
@@ -124,10 +132,10 @@ ERL_NIF_TERM aspike_format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
         } break;
         case AS_LIST: {
             auto len = as_list_size(&val->list);
-            std::vector<ERL_NIF_TERM> erl_list;
+            vector<ERL_NIF_TERM> erl_list;
             erl_list.reserve(len);
 
-            using Callback = std::function<bool(as_val * val)>;
+            using Callback = function<bool(as_val * val)>;
 
             Callback lambda = [&erl_list, env](as_val* val) -> bool {
                 if (!val) return false;
@@ -143,7 +151,7 @@ ERL_NIF_TERM aspike_format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
         } break;
         case AS_MAP: {
             auto len = as_map_size((as_map*)(&val->map));
-            std::vector<ERL_NIF_TERM> erl_list;
+            vector<ERL_NIF_TERM> erl_list;
             erl_list.reserve(len * 2);
 
             const as_orderedmap* amap = (const as_orderedmap*)&val->map;

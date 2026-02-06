@@ -36,18 +36,29 @@
 #include "common_methods.h"
 #include "sync_methods.h"
 
-// External references to atomic counters
-extern std::atomic<uint32_t> cdt_put_sync_counter;
-extern std::atomic<uint32_t> cdt_get_sync_counter;
+using namespace std;
+
+// External references to atomic parallel connection counters
+extern atomic<uint32_t> sync_current_counter;
+extern atomic<uint32_t> sync_peak_counter;
+extern atomic<int64_t> sync_peak_ttl_counter;
 
 // RAII helper for automatically managing sync operation counters
 class SyncOperationCounter {
 private:
-    std::atomic<uint32_t>* counter;
+    atomic<uint32_t>* counter;
 
 public:
-    explicit SyncOperationCounter(std::atomic<uint32_t>* cnt) : counter(cnt) {
-        counter->fetch_add(1);
+    explicit SyncOperationCounter(atomic<uint32_t>* current, atomic<uint32_t>* peak, atomic<int64_t>* peak_ttl) {
+        counter = current;
+        current->fetch_add(1);
+
+        auto value = current->load();
+        auto now = unix_ts();
+        if (value > peak->load() || now > peak_ttl->load()) {
+            peak->store(value);
+            peak_ttl->store(now + 15);
+        }
     }
 
     ~SyncOperationCounter() {
@@ -59,10 +70,9 @@ public:
     SyncOperationCounter& operator=(const SyncOperationCounter&) = delete;
 };
 
-ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    // Automatically track parallel operations
-    //SyncOperationCounter counter(&cdt_put_sync_counter);
+#define TRACK_CONNECTIONS SyncOperationCounter conn_counter(&sync_current_counter, &sync_peak_counter, &sync_peak_ttl_counter);
 
+ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
@@ -70,7 +80,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     unsigned int length;
-    std::string name_space, aspk_set, aspk_key;
+    string name_space, aspk_set, aspk_key;
     long ttl;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
@@ -125,7 +135,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     as_key key;
     as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
-    std::vector<as_cdt_ctx*> ctx_vec;
+    vector<as_cdt_ctx*> ctx_vec;
     as_operations ops;
     as_map_policy put_mode;
     // as_map_policy_set(&put_mode, AS_MAP_UNORDERED, AS_MAP_UPDATE);
@@ -135,7 +145,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
         ErlNifBinary bin_bin;
-        std::string bin_str;
+        string bin_str;
         int t_length;
         const ERL_NIF_TERM* tuple = NULL;
         // as_bytes as_bytes_val;
@@ -168,7 +178,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
         as_string key_str, subkey1, subkey2, subkey3;
         as_bytes subval1;
         as_integer subval2, subval3;
-        std::string fcap_key, valuesk, valuesk1, valuesk2;
+        string fcap_key, valuesk, valuesk1, valuesk2;
         long i64;
         for (uint ts_i = 0; ts_i < ts_length; ts_i++) {
             ERL_NIF_TERM ts_head;
@@ -207,8 +217,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
                 }
                 opnum = 0;
                 // subkey write time
-                auto now = std::chrono::system_clock::now().time_since_epoch();
-                long wt = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                auto now = chrono::system_clock::now().time_since_epoch();
+                long wt = chrono::duration_cast<chrono::seconds>(now).count();
                 valuesk2 = "wt";
                 as_string_init(&subkey3, (char*)valuesk2.c_str(), false);
                 as_integer_init(&subval3, wt);
@@ -230,6 +240,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     p.base.socket_timeout = socket_timeout;
     p.base.total_timeout = total_timeout;
 
+    TRACK_CONNECTIONS
+
     if (aerospike_key_operate(as, &err, &p, &key, &ops, NULL) != AEROSPIKE_OK) {
         rc = erl_error;
         msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
@@ -249,16 +261,13 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 }
 
 ERL_NIF_TERM aspike_nif_cdt_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    // Automatically track parallel operations
-    //SyncOperationCounter counter(&cdt_get_sync_counter);
-
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
     ErlNifBinary bin_ns, bin_set, bin_key;
-    std::string name_space, aspk_set, aspk_key;
+    string name_space, aspk_set, aspk_key;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
         return enif_make_badarg(env);
@@ -305,6 +314,8 @@ ERL_NIF_TERM aspike_nif_cdt_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     p.base.socket_timeout = socket_timeout;
     p.base.total_timeout = total_timeout;
 
+    TRACK_CONNECTIONS
+
     if (aerospike_key_get(as, &err, &p, &key, &p_rec) != AEROSPIKE_OK) {
         if (p_rec != NULL) {
             as_record_destroy(p_rec);
@@ -337,7 +348,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_sync(ErlNifEnv* env, int argc, const 
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
     ErlNifBinary bin_ns, bin_set, bin_key, bin_name;
-    std::string name_space, aspk_set, aspk_key, bin_str;
+    string name_space, aspk_set, aspk_key, bin_str;
     unsigned int length;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
@@ -383,7 +394,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_sync(ErlNifEnv* env, int argc, const 
     as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
     ErlNifBinary subkey_term;
-    std::string subkey_str;
+    string subkey_str;
     unsigned int subkeys_num = 0;
     for (uint i = 0; i < length; i++) {
         ERL_NIF_TERM head;
@@ -402,6 +413,8 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_sync(ErlNifEnv* env, int argc, const 
         as_operations_add_map_remove_by_key_list(&ops, bin_str.c_str(), (as_list*)&remove_list, AS_MAP_RETURN_NONE);
     }
     as_arraylist_destroy(&remove_list);
+
+    TRACK_CONNECTIONS
 
     if (aerospike_key_operate(as, &err, NULL, &key, &ops, NULL) != AEROSPIKE_OK) {
         rc = erl_error;
@@ -422,7 +435,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
     ErlNifBinary bin_ns, bin_set, bin_name;
-    std::string name_space, aspk_set, aspk_key, bin_str;
+    string name_space, aspk_set, aspk_key, bin_str;
     unsigned int length;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
@@ -447,11 +460,11 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
 
     CHECK_ALL
     ERL_NIF_TERM rc, msg;
-    std::vector<std::string> bin_str_list(length);
-    std::vector<std::vector<std::string>> skeys_lst;
-    std::vector<as_batch_write_record*> abwrs(length);
-    std::vector<as_operations> wopsl(length);
-    std::vector<as_arraylist> rval(length);
+    vector<string> bin_str_list(length);
+    vector<vector<string>> skeys_lst;
+    vector<as_batch_write_record*> abwrs(length);
+    vector<as_operations> wopsl(length);
+    vector<as_arraylist> rval(length);
 
     as_batch_records recs;
     as_batch_records_inita(&recs, length);
@@ -484,7 +497,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
         as_key_init_str(&(abwrs[i]->key), name_space.c_str(), aspk_set.c_str(), bin_str_list[i].c_str());
 
         auto ts_list = ksk_tuple[1];
-        std::vector<std::string> bin_str_sk_list(ts_length);
+        vector<string> bin_str_sk_list(ts_length);
         as_arraylist_init(&(rval[i]), ts_length, ts_length);
         for (uint j = 0; j < ts_length; j++) {
             ERL_NIF_TERM skl_head;
@@ -511,17 +524,19 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
         key_subkeys_list = tail;
     }
 
+    TRACK_CONNECTIONS
+
     as->config.policies.batch_write.ttl = 1000;
     as_error err;
     as_status status = aerospike_batch_write(as, &err, NULL, &recs);
 
-    std::vector<ERL_NIF_TERM> erl_list;
+    vector<ERL_NIF_TERM> erl_list;
     for (auto aitr : abwrs) {
         erl_list.push_back(enif_make_int(env, aitr->result));
         /*if(aitr->result == AEROSPIKE_OK){
-            std::cout << "WOPOK! \r\n";
+            cout << "WOPOK! \r\n";
         }else{
-            std::cout << "WOPNOK!: " << std::to_string(aitr->result) << "\r\n";
+            cout << "WOPNOK!: " << to_string(aitr->result) << "\r\n";
         }*/
     }
     auto opsl = enif_make_list_from_array(env, erl_list.data(), erl_list.size());
@@ -548,7 +563,7 @@ ERL_NIF_TERM aspike_nif_segment_tag_get_sync(ErlNifEnv* env, int argc, const ERL
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
     ErlNifBinary bin_ns, bin_set, bin_key, bin_columns;
-    std::string name_space, aspk_set, aspk_key, aspk_columns;
+    string name_space, aspk_set, aspk_key, aspk_columns;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
         return enif_make_badarg(env);
@@ -578,6 +593,8 @@ ERL_NIF_TERM aspike_nif_segment_tag_get_sync(ErlNifEnv* env, int argc, const ERL
     as_record* p_rec = NULL;
 
     const char* bins[] = {aspk_columns.c_str(), NULL};
+
+    TRACK_CONNECTIONS
 
     as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
@@ -728,7 +745,7 @@ ERL_NIF_TERM aspike_nif_binary_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
     ErlNifBinary bin_ns, bin_set, bin_key;
-    std::string name_space, aspk_set, aspk_key;
+    string name_space, aspk_set, aspk_key;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
         return enif_make_badarg(env);
@@ -1084,7 +1101,7 @@ ERL_NIF_TERM aspike_nif_binary_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     unsigned int length;
-    std::string name_space, aspk_set, aspk_key;
+    string name_space, aspk_set, aspk_key;
     long ttl;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
@@ -1129,12 +1146,12 @@ ERL_NIF_TERM aspike_nif_binary_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_
     rec.ttl = ttl;
     long ret_val = 0;
    
-    std::vector<as_bytes*> bin_vec; 
+    vector<as_bytes*> bin_vec; 
     for (uint i = 0; i < length; i++) {
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
         ErlNifBinary bin_bin, bin_val;
-        std::string bin_str;
+        string bin_str;
         int t_length;
         const ERL_NIF_TERM* tuple = NULL;
         //as_bytes as_bytes_val;
@@ -1228,7 +1245,7 @@ ERL_NIF_TERM aspike_nif_binary_remove_sync(ErlNifEnv* env, int argc, const ERL_N
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     unsigned int length;
-    std::string name_space, aspk_set, aspk_key;
+    string name_space, aspk_set, aspk_key;
     long ttl;
 
     if (!enif_inspect_binary(env, argv[0], &bin_ns)) {
@@ -1277,7 +1294,7 @@ ERL_NIF_TERM aspike_nif_binary_remove_sync(ErlNifEnv* env, int argc, const ERL_N
         ERL_NIF_TERM head;
         ERL_NIF_TERM tail;
         ErlNifBinary bin_bin;
-        std::string bin_str;
+        string bin_str;
 
         if (!enif_get_list_cell(env, list, &head, &tail)) {
             break;
@@ -1315,7 +1332,7 @@ ERL_NIF_TERM aspike_nif_cdt_expire_sync(ErlNifEnv* env, int argc, const ERL_NIF_
     ERL_NIF_TERM erl_ok = get_erl_ok();
 
     ErlNifBinary bin_ns, bin_set, bin_key;
-    std::string name_space, aspk_set, aspk_key;
+    string name_space, aspk_set, aspk_key;
     long ttl;
 
     return enif_make_tuple2(env, erl_error, enif_make_string(env, "method not completed", ERL_NIF_UTF8));
@@ -1356,13 +1373,13 @@ ERL_NIF_TERM aspike_nif_cdt_expire_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 
     as_cdt_ctx_add_map_key(&ctx, (as_val*)&as_cmp_wildcard);
     //as_string key_main;
-    //std::string main_key = "campaign.333";
+    //string main_key = "campaign.333";
     //as_string_init(&key_main, (char*)main_key.c_str(), false);
     //as_cdt_ctx_add_map_key(&ctx, (as_val*)&key_main);
 
     as_string key_ttl;
-    std::string ttl_key = "3333";
-    std::string bin_str = "fcap_map";
+    string ttl_key = "3333";
+    string bin_str = "fcap_map";
     as_string_init(&key_ttl, (char*)ttl_key.c_str(), false);
     //as_cdt_ctx_add_map_key(&ctx, (as_val*)&key_ttl);
     as_integer asv_begin, asv_end;
@@ -1375,7 +1392,7 @@ ERL_NIF_TERM aspike_nif_cdt_expire_sync(ErlNifEnv* env, int argc, const ERL_NIF_
     //as_operations_map_remove_by_value(&ops, bin_str.c_str(), &ctx, (as_val*)&key_ttl, AS_MAP_RETURN_COUNT);
 
     // working code delete by key lists
-    /*std::string bin_str = "fcap_map";
+    /*string bin_str = "fcap_map";
     as_operations ops;
     as_operations_inita(&ops, 1);
     as_map_policy put_mode;

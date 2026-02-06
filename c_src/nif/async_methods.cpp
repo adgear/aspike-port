@@ -24,6 +24,7 @@
 #include <erl_nif.h>
 #include <time.h>
 
+#include <atomic>
 #include <chrono>
 #include <functional>
 #include <iostream>
@@ -35,11 +36,28 @@
 #include "common_methods.h"
 #include "async_methods.h"
 
+using namespace std;
+
+// External references to atomic parallel connection counters
+extern atomic<uint32_t> async_current_counter;
+extern atomic<uint32_t> async_peak_counter;
+extern atomic<int64_t> async_peak_ttl_counter;
+
+#define INC_CONNECTION_COUNTER async_current_counter.fetch_add(1); \
+auto __value = async_current_counter.load(); \
+auto __now = unix_ts(); \
+if (__value > async_peak_counter.load() || __now > async_peak_ttl_counter.load()) { \
+    async_peak_counter.store(__value); \
+    async_peak_ttl_counter.store(__now + 15); \
+}
+
+#define DEC_CONNECTION_COUNTER async_current_counter.fetch_sub(1);
+
 // Async callback structure for async operations
 struct callback_data {
     ErlNifPid caller_pid;  // Erlang process to send result to
     ErlNifEnv* msg_env;    // Environment for creating response message
-    std::vector<as_cdt_ctx*> cdt_contexts;
+    vector<as_cdt_ctx*> cdt_contexts;
 
     // Constructor to properly initialize
     callback_data(ErlNifEnv* env) {
@@ -64,6 +82,8 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
     ERL_NIF_TERM result_msg;
 
     callback_data* cb_data = (callback_data*)udata;
+
+    DEC_CONNECTION_COUNTER
 
     if (err) {
         ERL_NIF_TERM error_msg;
@@ -106,21 +126,21 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
         return enif_make_badarg(env);
     }
-    std::string name_space;
+    string name_space;
     name_space.assign((const char*)erl_namespace.data, erl_namespace.size);
 
     ErlNifBinary erl_set_name;
     if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
         return enif_make_badarg(env);
     }
-    std::string set_name;
+    string set_name;
     set_name.assign((const char*)erl_set_name.data, erl_set_name.size);
 
     ErlNifBinary erl_primary_key;
     if (!enif_inspect_binary(env, argv[2], &erl_primary_key)) {
         return enif_make_badarg(env);
     }
-    std::string record_primary_key;
+    string record_primary_key;
     record_primary_key.assign((const char*)erl_primary_key.data, erl_primary_key.size);
 
     unsigned int bins_amount;
@@ -240,7 +260,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
         ErlNifBinary erl_bin_name;
         enif_inspect_binary(env, bin_tuple[0], &erl_bin_name);
-        std::string bin_name;
+        string bin_name;
         bin_name.assign((const char*)erl_bin_name.data, erl_bin_name.size);
         // now bin_name has a value like "fcap_map"
 
@@ -379,8 +399,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 // let's create a 'wt' key on second-level map
                 // Create aerospike string (a second level key name) which will be freed by context on its removal.
                 as_string* key_name = as_string_new_strdup("wt");
-                auto now = std::chrono::system_clock::now().time_since_epoch();
-                long timestamp = std::chrono::duration_cast<std::chrono::seconds>(now).count();
+                auto now = chrono::system_clock::now().time_since_epoch();
+                long timestamp = chrono::duration_cast<chrono::seconds>(now).count();
                 as_integer* wt_value = as_integer_new(timestamp);
                 // next line creates a key 'wt' in the map we created above in 'opnum == 1'
                 as_operations_map_put(&operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)wt_value);
@@ -415,6 +435,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
         return_data = enif_make_tuple2(env, erl_error, error_tuple);
     } else {
+        INC_CONNECTION_COUNTER
+
         return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "in_progress"));
     }
 
@@ -431,6 +453,8 @@ static void cdt_get_async_callback(as_error* err, as_record* record, void* udata
     ERL_NIF_TERM result_msg;
 
     callback_data* cb_data = (callback_data*)udata;
+
+    DEC_CONNECTION_COUNTER
 
     if (err) {
         ERL_NIF_TERM error_msg;
@@ -473,21 +497,21 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
         return enif_make_badarg(env);
     }
-    std::string name_space;
+    string name_space;
     name_space.assign((const char*)erl_namespace.data, erl_namespace.size);
 
     ErlNifBinary erl_set_name;
     if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
         return enif_make_badarg(env);
     }
-    std::string set_name;
+    string set_name;
     set_name.assign((const char*)erl_set_name.data, erl_set_name.size);
 
     ErlNifBinary erl_primary_key;
     if (!enif_inspect_binary(env, argv[2], &erl_primary_key)) {
         return enif_make_badarg(env);
     }
-    std::string record_primary_key;
+    string record_primary_key;
     record_primary_key.assign((const char*)erl_primary_key.data, erl_primary_key.size);
 
     const ERL_NIF_TERM* erl_policy = NULL;
@@ -546,6 +570,8 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
         return_data = enif_make_tuple2(env, erl_error, error_tuple);
     } else {
+        INC_CONNECTION_COUNTER
+
         return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "in_progress"));
     }
 
