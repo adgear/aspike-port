@@ -38,6 +38,7 @@
 #include "aspike_nif.h"
 #include "sync_methods.h"
 #include "async_methods.h"
+#include "common_methods.h"
 
 using namespace std;
 
@@ -426,6 +427,25 @@ static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, c
         enif_make_int(env, async_peak),
         enif_make_int(env, total_async_connections)
     );
+
+    // and let's check if the peak values are outdated too much.
+    // if we passed two metric scrape periods - we are definetly not updating these
+    // metrics, so let's reset them.
+    int64_t now = 0;
+    if (sync_peak > 0) {
+        now = unix_ts();
+        if (2 * 15 < (now - sync_peak_ttl_counter.load())) {
+            sync_current_counter.store(0);
+            sync_peak_counter.store(0);
+        }
+    }
+    if (async_peak > 0) {
+        if (now == 0) now = unix_ts();
+        if (2 * 15 < (now - async_peak_ttl_counter.load())) {
+            async_current_counter.store(0);
+            async_peak_counter.store(0);
+        }
+    }
 
     return enif_make_tuple2(env, erl_ok, connections_stat);
 }
