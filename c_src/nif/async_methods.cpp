@@ -53,24 +53,6 @@ extern mutex node_stats_mutex;
 extern const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);
 extern shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name);
 
-
-// Connection tracking functions (replacing ugly macros)
-void increment_async_connection_counter() {
-    async_current_counter.fetch_add(1);
-
-    auto value = async_current_counter.load();
-    auto now = unix_ts();
-
-    if (value > async_peak_counter.load() || now > async_peak_ttl_counter.load()) {
-        async_peak_counter.store(value);
-        async_peak_ttl_counter.store(now + 15);
-    }
-}
-
-void decrement_async_connection_counter() {
-    async_current_counter.fetch_sub(1);
-}
-
 void increment_async_connection_counter_with_node(string node_name) {
     if (node_name.length() == 0) return;
     auto node_stats = get_or_create_node_stats(node_name);
@@ -84,13 +66,13 @@ void increment_async_connection_counter_with_node(string node_name) {
     auto now = unix_ts();
 
     // Update global peaks
-    if (global_value > async_peak_counter.load() || now > async_peak_ttl_counter.load()) {
+    if (async_peak_counter.load() < global_value || async_peak_ttl_counter.load() < now) {
         async_peak_counter.store(global_value);
         async_peak_ttl_counter.store(now + 15);
     }
 
     // Update node-specific peaks
-    if (node_value > node_stats->async_peak.load() || now > node_stats->async_peak_ttl.load()) {
+    if (node_stats->async_peak.load() < node_value || node_stats->async_peak_ttl.load() < now) {
         node_stats->async_peak.store(node_value);
         node_stats->async_peak_ttl.store(now + 15);
     }

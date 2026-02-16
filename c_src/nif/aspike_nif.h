@@ -12,15 +12,11 @@ using namespace std;
 
 // Per-node connection tracking structures
 struct NodeConnectionStats {
-    atomic<uint32_t> sync_current;
-    atomic<uint32_t> sync_peak;
-    atomic<int64_t> sync_peak_ttl;
     atomic<uint32_t> async_current;
     atomic<uint32_t> async_peak;
     atomic<int64_t> async_peak_ttl;
 
     NodeConnectionStats() :
-        sync_current(0), sync_peak(0), sync_peak_ttl(0),
         async_current(0), async_peak(0), async_peak_ttl(0) {}
 };
 

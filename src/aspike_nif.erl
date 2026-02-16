@@ -191,7 +191,7 @@ connect(_, _) ->
 -spec get_connections_stats() ->
     {ok, {
         {sync_current(), sync_peak(), non_neg_integer(), async_current(), async_peak(), non_neg_integer()},
-        {sync_current(), sync_peak(), async_current(), async_peak()}
+        {async_current(), async_peak()}
     }}
     | {error, string()}.
 get_connections_stats() ->

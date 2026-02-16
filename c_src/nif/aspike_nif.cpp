@@ -521,8 +521,6 @@ static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, c
         enif_make_uint(env, total_async_connections)
     );
 
-    uint32_t host_sync_current_max = 0;
-    uint32_t host_sync_peak_max = 0;
     uint32_t host_async_current_max = 0;
     uint32_t host_async_peak_max = 0;
 
@@ -534,37 +532,26 @@ static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, c
             continue; // Skip invalid entries
         }
 
-        uint32_t node_sync_peak = stats->sync_peak.load();
         uint32_t node_async_peak = stats->async_peak.load();
     
-        if (host_sync_peak_max < node_sync_peak) {
-            host_sync_current_max = stats->sync_current.load();
-            host_sync_peak_max = node_sync_peak;
-        }
         if (host_async_peak_max < node_async_peak) {
             host_async_current_max = stats->async_current.load();
             host_async_peak_max = node_async_peak;
         }
 
         // Check if the peak values are outdated for this node and reset them if needed
-        if (node_sync_peak > 0 && stats->sync_peak_ttl.load() < outdated_ts) {
-            stats->sync_current.store(0);
-            stats->sync_peak.store(0);
-        }
         if (node_async_peak > 0 && stats->async_peak_ttl.load() < outdated_ts) {
             stats->async_current.store(0);
             stats->async_peak.store(0);
         }
     }
 
-    ERL_NIF_TERM worse_host_stats = enif_make_tuple4(env,
-        enif_make_uint(env, host_sync_current_max),
-        enif_make_uint(env, host_sync_peak_max),
+    ERL_NIF_TERM worse_host_stats = enif_make_tuple2(env,
         enif_make_uint(env, host_async_current_max),
         enif_make_uint(env, host_async_peak_max)
     );
 
-    // Combined stats: {global_stats, per_node_stats}
+    // Combined stats: {global_stats, worse_host_stats}
     ERL_NIF_TERM combined_stats = enif_make_tuple2(env, global_stats, worse_host_stats);
 
     // Check if the peak values are outdated and reset them if needed
