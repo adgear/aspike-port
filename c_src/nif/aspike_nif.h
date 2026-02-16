@@ -1,6 +1,30 @@
 #ifndef ASPIKE_NIF_H
 #define ASPIKE_NIF_H
 
+#include <string>
+#include <memory>
+#include <atomic>
+
+using namespace std;
+
+// Forward declarations
+//typedef struct as_node_s as_node;
+
+// Per-node connection tracking structures
+struct NodeConnectionStats {
+    atomic<uint32_t> sync_current;
+    atomic<uint32_t> sync_peak;
+    atomic<int64_t> sync_peak_ttl;
+    atomic<uint32_t> async_current;
+    atomic<uint32_t> async_peak;
+    atomic<int64_t> async_peak_ttl;
+
+    NodeConnectionStats() :
+        sync_current(0), sync_peak(0), sync_peak_ttl(0),
+        async_current(0), async_peak(0), async_peak_ttl(0) {}
+};
+
+
 #define MAX_HOST_SIZE 1024
 #define MAX_KEY_STR_SIZE 1024
 #define MAX_NAMESPACE_SIZE 32	// based on current server limit
@@ -38,5 +62,7 @@ aerospike* get_aerospike ();
 bool get_is_connected ();
 ERL_NIF_TERM get_erl_error ();
 ERL_NIF_TERM get_erl_ok ();
+const as_node* get_target_node_for_key (const char* namespace_name, const char* set, const char* key_str);
+shared_ptr<NodeConnectionStats> get_or_create_node_stats (const string& node_name);
 
 #endif // ASPIKE_NIF_H

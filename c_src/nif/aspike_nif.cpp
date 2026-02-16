@@ -10,6 +10,9 @@
 #include <functional>
 #include <assert.h>
 #include <atomic>
+#include <memory>
+#include <unordered_map>
+#include <mutex>
 
 #include <aerospike/aerospike.h>
 #include <aerospike/aerospike_info.h>
@@ -20,6 +23,7 @@
 #include <aerospike/as_status.h>
 #include <aerospike/as_node.h>
 #include <aerospike/as_cluster.h>
+#include <aerospike/as_partition.h>
 #include <aerospike/as_lookup.h>
 #include <aerospike/as_bin.h>
 #include <aerospike/as_val.h>
@@ -57,10 +61,94 @@ atomic<uint32_t> async_current_counter(0);
 atomic<uint32_t> async_peak_counter(0);
 atomic<int64_t> async_peak_ttl_counter(0);
 
+// Thread-safe storage using node name as key
+static unordered_map<string, shared_ptr<NodeConnectionStats>> node_stats_map;
+static mutex node_stats_mutex; // Mutex for thread-safe map access
+
 aerospike* get_aerospike () { return &as; }
 bool get_is_connected () { return is_connected; }
 ERL_NIF_TERM get_erl_error () { return erl_error; }
 ERL_NIF_TERM get_erl_ok () { return erl_ok; }
+
+// Get target node for a key using proper Aerospike partition routing
+const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str) {
+    if (!namespace_name || !key_str || !is_connected || !as.cluster) {
+        return nullptr;
+    }
+
+    // Create a key and compute its digest
+    as_key key;
+    as_key_init_str(&key, namespace_name, set, key_str);
+
+    as_error err;
+    if (as_key_set_digest(&err, &key) != AEROSPIKE_OK) {
+        as_key_destroy(&key);
+        return nullptr;
+    }
+
+    // Get the digest and compute partition ID
+    as_digest* digest = as_key_digest(&key);
+    if (!digest) {
+        as_key_destroy(&key);
+        return nullptr;
+    }
+
+    // Get partition table for this namespace
+    as_partition_tables* pt = &as.cluster->partition_tables;
+    as_partition_table* table = nullptr;
+
+    // Find the partition table for our namespace
+    for (uint32_t i = 0; i < pt->size; i++) {
+        if (pt->tables[i] && strcmp(pt->tables[i]->ns, namespace_name) == 0) {
+            table = pt->tables[i];
+            break;
+        }
+    }
+
+    if (!table) {
+        as_key_destroy(&key);
+        return nullptr;
+    }
+
+    // Calculate partition ID
+    uint32_t partition_id = as_partition_getid(digest->value, table->size);
+
+    // Get partition and find master node
+    as_partition* partition = &table->partitions[partition_id];
+
+    // Get the master node (replica index 0) for writes, or any available node for reads
+    uint8_t replica_index = 0;
+    as_node* target_node = as_partition_get_node(as.cluster, namespace_name, partition,
+                                                 nullptr, AS_POLICY_REPLICA_MASTER,
+                                                 1, &replica_index);
+
+    as_key_destroy(&key);
+
+    return target_node;
+}
+
+// Get or create stats for a node (thread-safe)
+shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name) {
+    // Fast path: check without mutex first (common case after cluster initialization)
+    auto it = node_stats_map.find(node_name);
+    if (it != node_stats_map.end()) {
+        return it->second;
+    }
+
+    // Slow path: not found, acquire mutex to create new entry
+    lock_guard<mutex> lock(node_stats_mutex);
+
+    // Double-check: another thread might have created it while we waited for the lock
+    auto it2 = node_stats_map.find(node_name);
+    if (it2 != node_stats_map.end()) {
+        return it2->second;
+    }
+
+    // Create new stats entry
+    auto stats = make_shared<NodeConnectionStats>();
+    node_stats_map[node_name] = stats;
+    return stats;
+}
 
 // ----------------------------------------------------------------------------
 
@@ -407,7 +495,11 @@ static ERL_NIF_TERM aspike_nif_host_info(ErlNifEnv* env, int argc, const ERL_NIF
 }
 
 static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    CHECK_ALL
 
+    int64_t outdated_ts = unix_ts() - 2 * 15;
+
+    // Get global statistics
     uint32_t sync_current = sync_current_counter.load();
     uint32_t sync_peak = sync_peak_counter.load();
     uint32_t total_sync_connections = 0;
@@ -419,35 +511,73 @@ static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, c
         total_async_connections = as.cluster->nodes->size * as.config.async_max_conns_per_node;
     }
 
-    ERL_NIF_TERM connections_stat = enif_make_tuple6(env,
-        enif_make_int(env, sync_current),
-        enif_make_int(env, sync_peak),
-        enif_make_int(env, total_sync_connections),
-        enif_make_int(env, async_current),
-        enif_make_int(env, async_peak),
-        enif_make_int(env, total_async_connections)
+    // Create global stats tuple
+    ERL_NIF_TERM global_stats = enif_make_tuple6(env,
+        enif_make_uint(env, sync_current),
+        enif_make_uint(env, sync_peak),
+        enif_make_uint(env, total_sync_connections),
+        enif_make_uint(env, async_current),
+        enif_make_uint(env, async_peak),
+        enif_make_uint(env, total_async_connections)
     );
 
-    // and let's check if the peak values are outdated too much.
-    // if we passed two metric scrape periods - we are definetly not updating these
-    // metrics, so let's reset them.
-    int64_t now = 0;
-    if (sync_peak > 0) {
-        now = unix_ts();
-        if (2 * 15 < (now - sync_peak_ttl_counter.load())) {
-            sync_current_counter.store(0);
-            sync_peak_counter.store(0);
+    uint32_t host_sync_current_max = 0;
+    uint32_t host_sync_peak_max = 0;
+    uint32_t host_async_current_max = 0;
+    uint32_t host_async_peak_max = 0;
+
+    // No lock needed for read-only iteration through stable map
+    for (const auto& pair : node_stats_map) {
+        const auto& stats = pair.second;
+
+        if (!stats) {
+            continue; // Skip invalid entries
         }
-    }
-    if (async_peak > 0) {
-        if (now == 0) now = unix_ts();
-        if (2 * 15 < (now - async_peak_ttl_counter.load())) {
-            async_current_counter.store(0);
-            async_peak_counter.store(0);
+
+        uint32_t node_sync_peak = stats->sync_peak.load();
+        uint32_t node_async_peak = stats->async_peak.load();
+    
+        if (host_sync_peak_max < node_sync_peak) {
+            host_sync_current_max = stats->sync_current.load();
+            host_sync_peak_max = node_sync_peak;
+        }
+        if (host_async_peak_max < node_async_peak) {
+            host_async_current_max = stats->async_current.load();
+            host_async_peak_max = node_async_peak;
+        }
+
+        // Check if the peak values are outdated for this node and reset them if needed
+        if (node_sync_peak > 0 && stats->sync_peak_ttl.load() < outdated_ts) {
+            stats->sync_current.store(0);
+            stats->sync_peak.store(0);
+        }
+        if (node_async_peak > 0 && stats->async_peak_ttl.load() < outdated_ts) {
+            stats->async_current.store(0);
+            stats->async_peak.store(0);
         }
     }
 
-    return enif_make_tuple2(env, erl_ok, connections_stat);
+    ERL_NIF_TERM worse_host_stats = enif_make_tuple4(env,
+        enif_make_uint(env, host_sync_current_max),
+        enif_make_uint(env, host_sync_peak_max),
+        enif_make_uint(env, host_async_current_max),
+        enif_make_uint(env, host_async_peak_max)
+    );
+
+    // Combined stats: {global_stats, per_node_stats}
+    ERL_NIF_TERM combined_stats = enif_make_tuple2(env, global_stats, worse_host_stats);
+
+    // Check if the peak values are outdated and reset them if needed
+    if (sync_peak > 0 && sync_peak_ttl_counter.load() < outdated_ts) {
+        sync_current_counter.store(0);
+        sync_peak_counter.store(0);
+    }
+    if (async_peak > 0 && async_peak_ttl_counter.load() < outdated_ts) {
+        async_current_counter.store(0);
+        async_peak_counter.store(0);
+    }
+
+    return enif_make_tuple2(env, erl_ok, combined_stats);
 }
 
 #define NIF_DIRTY_FUN(A, B, C) {A, B, C, ERL_DIRTY_JOB_IO_BOUND}

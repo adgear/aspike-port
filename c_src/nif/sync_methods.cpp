@@ -31,6 +31,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 
 #include "aspike_nif.h"
 #include "common_methods.h"
@@ -43,26 +46,29 @@ extern atomic<uint32_t> sync_current_counter;
 extern atomic<uint32_t> sync_peak_counter;
 extern atomic<int64_t> sync_peak_ttl_counter;
 
+extern unordered_map<string, shared_ptr<NodeConnectionStats>> node_stats_map;
+extern mutex node_stats_mutex;
+
+// Helper functions (defined in aspike_nif.cpp)
+extern const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);
+extern shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name);
+
 // RAII helper for automatically managing sync operation counters
 class SyncOperationCounter {
-private:
-    atomic<uint32_t>* counter;
-
 public:
-    explicit SyncOperationCounter(atomic<uint32_t>* current, atomic<uint32_t>* peak, atomic<int64_t>* peak_ttl) {
-        counter = current;
-        current->fetch_add(1);
+    explicit SyncOperationCounter() {
+        sync_current_counter.fetch_add(1);
 
-        auto value = current->load();
+        auto value = sync_current_counter.load();
         auto now = unix_ts();
-        if (value > peak->load() || now > peak_ttl->load()) {
-            peak->store(value);
-            peak_ttl->store(now + 15);
+        if (value > sync_peak_counter.load() || now > sync_peak_ttl_counter.load()) {
+            sync_peak_counter.store(value);
+            sync_peak_ttl_counter.store(now + 15);
         }
     }
 
     ~SyncOperationCounter() {
-        counter->fetch_sub(1);
+        sync_current_counter.fetch_sub(1);
     }
 
     // Disable copy constructor and assignment operator
@@ -70,7 +76,48 @@ public:
     SyncOperationCounter& operator=(const SyncOperationCounter&) = delete;
 };
 
-#define TRACK_CONNECTIONS SyncOperationCounter conn_counter(&sync_current_counter, &sync_peak_counter, &sync_peak_ttl_counter);
+// Enhanced RAII helper for automatically managing sync operation counters with node awareness
+class SyncOperationCounterWithNode {
+private:
+    shared_ptr<NodeConnectionStats> node_stats;
+
+public:
+    explicit SyncOperationCounterWithNode(const char* ns, const char* set, const char* key) {
+        // Determine target node and get stats
+        auto target_node = get_target_node_for_key(ns, set, key);
+        if (!target_node) return;
+        auto node_name = string(target_node->name);
+        node_stats = get_or_create_node_stats(node_name);
+
+        // Increment both global and per-node counters
+        sync_current_counter.fetch_add(1);
+        node_stats->sync_current.fetch_add(1);
+
+        // Update peak values with TTL logic
+        auto now = unix_ts();
+        auto global_value = sync_current_counter.load();
+        auto node_value = node_stats->sync_current.load();
+
+        if (global_value > sync_peak_counter.load() || now > sync_peak_ttl_counter.load()) {
+            sync_peak_counter.store(global_value);
+            sync_peak_ttl_counter.store(now + 15);
+        }
+
+        if (node_value > node_stats->sync_peak.load() || now > node_stats->sync_peak_ttl.load()) {
+            node_stats->sync_peak.store(node_value);
+            node_stats->sync_peak_ttl.store(now + 15);
+        }
+    }
+
+    ~SyncOperationCounterWithNode() {
+        sync_current_counter.fetch_sub(1);
+        node_stats->sync_current.fetch_sub(1);
+    }
+
+    // Disable copy constructor and assignment operator
+    SyncOperationCounterWithNode(const SyncOperationCounterWithNode&) = delete;
+    SyncOperationCounterWithNode& operator=(const SyncOperationCounterWithNode&) = delete;
+};
 
 ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
@@ -240,7 +287,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     p.base.socket_timeout = socket_timeout;
     p.base.total_timeout = total_timeout;
 
-    TRACK_CONNECTIONS
+    SyncOperationCounterWithNode conn_counter(name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
     if (aerospike_key_operate(as, &err, &p, &key, &ops, NULL) != AEROSPIKE_OK) {
         rc = erl_error;
@@ -314,7 +361,7 @@ ERL_NIF_TERM aspike_nif_cdt_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     p.base.socket_timeout = socket_timeout;
     p.base.total_timeout = total_timeout;
 
-    TRACK_CONNECTIONS
+    SyncOperationCounterWithNode conn_counter(name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
     if (aerospike_key_get(as, &err, &p, &key, &p_rec) != AEROSPIKE_OK) {
         if (p_rec != NULL) {
@@ -414,7 +461,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_sync(ErlNifEnv* env, int argc, const 
     }
     as_arraylist_destroy(&remove_list);
 
-    TRACK_CONNECTIONS
+    SyncOperationCounterWithNode conn_counter(name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
     if (aerospike_key_operate(as, &err, NULL, &key, &ops, NULL) != AEROSPIKE_OK) {
         rc = erl_error;
@@ -524,7 +571,8 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
         key_subkeys_list = tail;
     }
 
-    TRACK_CONNECTIONS
+    // For batch operations, use regular counter since we can't determine specific target node
+    SyncOperationCounter conn_counter;
 
     as->config.policies.batch_write.ttl = 1000;
     as_error err;
@@ -594,7 +642,7 @@ ERL_NIF_TERM aspike_nif_segment_tag_get_sync(ErlNifEnv* env, int argc, const ERL
 
     const char* bins[] = {aspk_columns.c_str(), NULL};
 
-    TRACK_CONNECTIONS
+    SyncOperationCounterWithNode conn_counter(name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 
     as_key_init_str(&key, name_space.c_str(), aspk_set.c_str(), aspk_key.c_str());
 

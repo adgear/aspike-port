@@ -31,6 +31,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
 
 #include "aspike_nif.h"
 #include "common_methods.h"
@@ -43,24 +46,71 @@ extern atomic<uint32_t> async_current_counter;
 extern atomic<uint32_t> async_peak_counter;
 extern atomic<int64_t> async_peak_ttl_counter;
 
-#define INC_CONNECTION_COUNTER async_current_counter.fetch_add(1); \
-auto __value = async_current_counter.load(); \
-auto __now = unix_ts(); \
-if (__value > async_peak_counter.load() || __now > async_peak_ttl_counter.load()) { \
-    async_peak_counter.store(__value); \
-    async_peak_ttl_counter.store(__now + 15); \
+extern unordered_map<string, shared_ptr<NodeConnectionStats>> node_stats_map;
+extern mutex node_stats_mutex;
+
+// Helper functions (defined in aspike_nif.cpp)
+extern const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);
+extern shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name);
+
+
+// Connection tracking functions (replacing ugly macros)
+void increment_async_connection_counter() {
+    async_current_counter.fetch_add(1);
+
+    auto value = async_current_counter.load();
+    auto now = unix_ts();
+
+    if (value > async_peak_counter.load() || now > async_peak_ttl_counter.load()) {
+        async_peak_counter.store(value);
+        async_peak_ttl_counter.store(now + 15);
+    }
 }
 
-#define DEC_CONNECTION_COUNTER async_current_counter.fetch_sub(1);
+void decrement_async_connection_counter() {
+    async_current_counter.fetch_sub(1);
+}
+
+void increment_async_connection_counter_with_node(string node_name) {
+    if (node_name.length() == 0) return;
+    auto node_stats = get_or_create_node_stats(node_name);
+
+    // Increment both global and per-node counters
+    async_current_counter.fetch_add(1);
+    node_stats->async_current.fetch_add(1);
+
+    auto global_value = async_current_counter.load();
+    auto node_value = node_stats->async_current.load();
+    auto now = unix_ts();
+
+    // Update global peaks
+    if (global_value > async_peak_counter.load() || now > async_peak_ttl_counter.load()) {
+        async_peak_counter.store(global_value);
+        async_peak_ttl_counter.store(now + 15);
+    }
+
+    // Update node-specific peaks
+    if (node_value > node_stats->async_peak.load() || now > node_stats->async_peak_ttl.load()) {
+        node_stats->async_peak.store(node_value);
+        node_stats->async_peak_ttl.store(now + 15);
+    }
+}
+
+void decrement_async_connection_counter_with_node(const string& node_name) {
+    async_current_counter.fetch_sub(1);
+    auto node_stats = get_or_create_node_stats(node_name);
+    node_stats->async_current.fetch_sub(1);
+}
 
 // Async callback structure for async operations
 struct callback_data {
     ErlNifPid caller_pid;  // Erlang process to send result to
     ErlNifEnv* msg_env;    // Environment for creating response message
     vector<as_cdt_ctx*> cdt_contexts;
+    string node_name; // Add node tracking for decrement
 
     // Constructor to properly initialize
-    callback_data(ErlNifEnv* env) {
+    callback_data(ErlNifEnv* env, const string& node_name) : node_name(node_name) {
         msg_env = enif_alloc_env();
     }
 
@@ -83,7 +133,7 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 
     callback_data* cb_data = (callback_data*)udata;
 
-    DEC_CONNECTION_COUNTER
+    decrement_async_connection_counter_with_node(cb_data->node_name);
 
     if (err) {
         ERL_NIF_TERM error_msg;
@@ -227,17 +277,25 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     as_map_policy put_mode;
     as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
-    // Allocate callback data with proper initialization on heap
-    callback_data* cb_data = new callback_data(env);
+    // Determine target node for this key
+    string node_name = "";
+    const as_node* target_node = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
+    if (target_node) {
+        node_name = string(target_node->name);
+    }
 
-    // Get caller PID and create callback data
-    if (!enif_self(env, &cb_data->caller_pid)) {
-        delete cb_data;
+    // Validate caller PID first before allocating callback data
+    ErlNifPid caller_pid;
+    if (!enif_self(env, &caller_pid)) {
         auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_NO_CALLER_ID);
         auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
         auto message = enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8);
         return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
     }
+
+    // Now allocate callback data with proper initialization
+    callback_data* cb_data = new callback_data(env, node_name);
+    cb_data->caller_pid = caller_pid;
 
     as_key record_key;
     as_key_init_str(&record_key, name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
@@ -435,7 +493,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
         return_data = enif_make_tuple2(env, erl_error, error_tuple);
     } else {
-        INC_CONNECTION_COUNTER
+        increment_async_connection_counter_with_node(node_name);
 
         return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "in_progress"));
     }
@@ -454,7 +512,7 @@ static void cdt_get_async_callback(as_error* err, as_record* record, void* udata
 
     callback_data* cb_data = (callback_data*)udata;
 
-    DEC_CONNECTION_COUNTER
+    decrement_async_connection_counter_with_node(cb_data->node_name);
 
     if (err) {
         ERL_NIF_TERM error_msg;
@@ -535,17 +593,25 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
     CHECK_ALL
 
-    // Allocate callback data with proper initialization on heap
-    callback_data* cb_data = new callback_data(env);
+    // Determine target node for this key
+    string node_name = "";
+    const as_node* target_node = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
+    if (target_node) {
+        node_name = string(target_node->name);
+    }
 
-    // Get caller PID and create callback data
-    if (!enif_self(env, &cb_data->caller_pid)) {
-        delete cb_data;
+    // Validate caller PID first before allocating callback data
+    ErlNifPid caller_pid;
+    if (!enif_self(env, &caller_pid)) {
         auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_NO_CALLER_ID);
         auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK);
         auto message = enif_make_string(env, "Failed to get caller PID", ERL_NIF_UTF8);
         return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message));
     }
+
+    // Now allocate callback data with proper initialization
+    callback_data* cb_data = new callback_data(env, node_name);
+    cb_data->caller_pid = caller_pid;
 
     as_key record_key;
     as_key_init_str(&record_key, name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
@@ -570,7 +636,7 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
         return_data = enif_make_tuple2(env, erl_error, error_tuple);
     } else {
-        INC_CONNECTION_COUNTER
+        increment_async_connection_counter_with_node(node_name);
 
         return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "in_progress"));
     }

@@ -97,7 +97,8 @@ quick_test() ->
             end;
         {error, Error} ->
             io:format("Read error happened: ~p.~n", [Error])
-    end.
+    end,
+    io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]).
 
 init_tester() ->
     case whereis(tester) of
@@ -120,8 +121,8 @@ stress_test() ->
     AmountOfRequests = 10_000,
     Command = cdt_put,
     %Command = cdt_get,
-    %AmountOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
-    AmountOfClients = [20],
+    %AmountsOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
+    AmountsOfClients = [20],
 
     Namespace = <<"test">>,
     SetName = <<"test_set">>,
@@ -158,7 +159,7 @@ stress_test() ->
     ModeAtom = get_api_mode(default),
     TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfRequests),
 
-    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfRequests, AmountOfClients),
+    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfRequests, AmountsOfClients),
     ok.
 
 memory_leak_test() ->

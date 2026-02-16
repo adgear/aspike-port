@@ -112,6 +112,15 @@
 
 -define(LIBNAME, ?MODULE).
 
+% Type definitions for per-node connection stats
+-type node_name() :: binary().
+-type sync_current() :: non_neg_integer().
+-type sync_peak() :: non_neg_integer().
+-type async_current() :: non_neg_integer().
+-type async_peak() :: non_neg_integer().
+-type sync_ttl() :: integer().
+-type async_ttl() :: integer().
+
 % -------------------------------------------------------------------------------
 
 init() ->
@@ -182,7 +191,10 @@ connect() ->
 connect(_, _) ->
     not_loaded(?LINE).
 
--spec get_connections_stats() -> {ok, {integer(),integer(),integer(),integer(),integer(),integer()}} | {error, string()}.
+-spec get_connections_stats() ->
+    {ok, {{sync_current(), sync_peak(), non_neg_integer(), async_current(), async_peak(), non_neg_integer()},
+          [{node_name(), sync_current(), sync_peak(), async_current(), async_peak(), sync_ttl(), async_ttl()}]}}
+    | {error, string()}.
 get_connections_stats() ->
     not_loaded(?LINE).
 
