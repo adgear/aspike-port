@@ -118,11 +118,10 @@ stress_test() ->
     init_tester(),
 
     TestNamePrefix = "local",
-    AmountOfRequests = 10_000,
+    AmountOfOps = 10_000,
     Command = cdt_put,
     %Command = cdt_get,
-    %AmountsOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
-    AmountsOfClients = [20],
+    AmountsOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
 
     Namespace = <<"test">>,
     SetName = <<"test_set">>,
@@ -134,7 +133,8 @@ stress_test() ->
                 Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
                 Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
                 Bins = [{MapKey1, [Value1, Value2, Counter]}],
-                TTL = 60 * 60,
+                % in seconds, 10 * 60 means 10 minutes
+                TTL = 10 * 60,
                 cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, ?ASPIKE_DEFAULT_POLICY)
             end;
         cdt_get ->
@@ -157,16 +157,16 @@ stress_test() ->
         end,
 
     ModeAtom = get_api_mode(default),
-    TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfRequests),
+    TestName = TestNamePrefix ++ " " ++ atom_to_list(ModeAtom) ++ " " ++ atom_to_list(Command) ++ " " ++ integer_to_list(AmountOfOps),
 
-    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfRequests, AmountsOfClients),
+    aspike_nif_test_utils:stress_test_loop(TestName, ActionFunc, AmountOfOps, AmountsOfClients),
     ok.
 
 memory_leak_test() ->
     init(),
     init_tester(),
 
-    AmountOfRequests = 100_000_000,
+    AmountOfOps = 100_000_000,
     AmountOfClients = 50,
 
     Namespace = <<"test">>,
@@ -177,7 +177,8 @@ memory_leak_test() ->
         Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
         Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
         Bins = [{MapKey1, [Value1, Value2, Counter]}],
-        TTL = 60 * 60,
+        % No need to keep the record longger than 5 seconds
+        TTL = 5,
         cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, ?ASPIKE_DEFAULT_POLICY),
 
         Result = cdt_get(Namespace, SetName, RecordKeyName, ?ASPIKE_DEFAULT_POLICY),
@@ -196,7 +197,7 @@ memory_leak_test() ->
         end
      end,
 
-    aspike_nif_test_utils:memory_leak_test(ActionFunc, AmountOfRequests, AmountOfClients),
+    aspike_nif_test_utils:memory_leak_test(ActionFunc, AmountOfOps, AmountOfClients),
     ok.
 
 cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->

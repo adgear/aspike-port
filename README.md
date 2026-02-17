@@ -7,7 +7,7 @@ image to run Aerospike, but you can choose any. For reference, you can follow gu
  * https://aerospike.com/download/server/community/
  * https://hub.docker.com/r/aerospike/aerospike-server
 
-For simplicity, run next command to download and run aerospike docker image:
+Run next command to download and run aerospike docker image:
 ```bash
 docker run -d --rm --name aerospike_test --ulimit nofile=65536:65536 -p 3000:3000 -p 3001:3001 -p 3002:3002 -p 3003:3003 aerospike:ce-7.1.0.0
 ```
@@ -19,16 +19,9 @@ docker logs aerospike_test # to get logs from Aerospike
 docker exec -ti aerospike_test /bin/bash # to get shell inside container
 ```
 
-You'll need to know the IP address of the aerospike instance, so run the command
-```bash
-docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' aerospike_test
-```
-and you should get something like `172.17.0.1`. If that command fails with `template parsing error` just run
-`docker inspect aerospike_test` and try to find the `IPAddress` record manually.
-
 If you need to talk to aerospike in AQL you can run the aql utility:
 ```bash
-docker run --rm -ti aerospike/aerospike-tools:latest aql -h 172.17.0.1
+docker run --rm -ti aerospike/aerospike-tools:latest aql -h 127.0.0.1
 ```
 and there you can run sample queries like
 ```sql
@@ -42,7 +35,7 @@ to see specific record that namespace/set.
 
 If you need to run AS Admin (ASADM) you can run next command:
 ```bash
-docker run --rm -ti aerospike/aerospike-tools:latest asadm -h 172.17.0.1
+docker run --rm -ti aerospike/aerospike-tools:latest asadm -h 127.0.0.1
 ```
 
 ## Building aspike-port
@@ -50,7 +43,12 @@ docker run --rm -ti aerospike/aerospike-tools:latest asadm -h 172.17.0.1
 Just run make:
 
 ```bash
-$ make
+$ rebar3 compile
+```
+
+Here's the command you can use to speedup compilation and testing the code:
+```
+rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_test quick_test
 ```
 
 ## Run perf tests
@@ -61,19 +59,18 @@ erl -pa _build/default/lib/aspike_port/ebin
 ```
 and then run next code to initialize NIF connection:
 ```erlang
-application:set_env(aspike_port, host, "172.17.0.1").
+application:set_env(aspike_port, host, "127.0.0.1").
 application:set_env(aspike_port, port, 3000).
 application:set_env(aspike_port, user, "").
 application:set_env(aspike_port, psw, "").
 aspike_nif:as_init().
 aspike_nif:host_add().
 aspike_nif:connect().
-aspike_nif_test:mp_insert(10, 10, 0).
 ```
-
-TODO: define how to use these tests.
+Or you can run next command to open the shell with connection initialized based on hardcoded values in the
+function aspike_nif_test:init():
 ```
-rebar3 compile && erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_test quick_test
+erl -pa _build/default/lib/aspike_port/ebin -s aspike_nif_test init
 ```
 
 Next you can run very basic commands just to make sure the connection working and aerospike is able to
@@ -110,6 +107,25 @@ it will produce 2 files: /tmp/read_stats.txt and /tmp/insert_stats.txt
 aspike_nif_test:mp_insert(40, 1_000_000, 0).
 aspike_nif_test:mp_reads(40, 1_000_000, 0).
 ```
-
 It will run 10 concurrent insert processes, each will insert 1000000 keys, with 0ms delay
-and 20 concurrent read processes, each will read 1000000 keys with 0ms delay
+and 20 concurrent read processes, each will read 1000000 keys with 0ms delay.
+
+To run the stress test with different amount of clients you may use function
+```erlang
+aspike_nif_test:stress_test().
+```
+This function runs certain amount of operations with different amount of parallel clients and measures the operation times.
+Then it outputs the results to the console and writes the same data to json file in the root folder of this project.
+You might want to edit function `stress_test()` to define some parameters. The main are:
+- **AmountsOfClients** - number of clients to run in parallel. For instance, [5, 10] means first 5 clients will query database in parallel, and after they fnish the same will be repeated with 10 parallel clients.
+- **AmountOfOps** - amount operations each client will do. Not all clients combined, but each client.
+- **Command** - the command to run. This variable basically defines the `ActionFunc` variable, a function which does the actual operation.
+- **ActionFunc** - the test function which defined what to do on each 'Operation'. Basically you want to keep it as simple as possible, like one operation per time, but you can add combination of command, like cdt_put followed by cdt_get. And if you do this keep in mind that Aerospike may be running in eventual consistency mode (check your mode by reading Aerospike docs how to do that). The function defined in `ActionFunc` accepts `Counter` variable which allows you to build unique primary key or any other data to be distinct from the other operation.
+- **TestName** - variable defines so called 'test name', but basically it's going to be the name of the JSON file.
+
+### Memory leak test
+You can use next function:
+```erlang
+aspike_nif_test:memory_leak_test().
+```
+and you want to define in `ActionFunc` all code you are going to cover. By default all async functions are covered as of now. Usually it's OK to leave test running or couple hours.

@@ -35,36 +35,36 @@ stress_test_loop(TestName, _, _, []) ->
             collector ! clear_stats
     end;
 
-stress_test_loop(TestName, ActionFunc, AmountOfRequests, [AmountOfClients | Tail]) ->
+stress_test_loop(TestName, ActionFunc, AmountOfOps, [AmountOfClients | Tail]) ->
     collector ! {test_starts, AmountOfClients},
     receive
         collector_ack -> ok
     end,
-    stress_test_runner(AmountOfClients, ActionFunc, AmountOfRequests),
+    stress_test_runner(AmountOfClients, ActionFunc, AmountOfOps),
     receive
         collection_done -> ok
     end,
-    stress_test_loop(TestName, ActionFunc, AmountOfRequests, Tail).
+    stress_test_loop(TestName, ActionFunc, AmountOfOps, Tail).
 
-stress_test_runner(AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
+stress_test_runner(AmountOfClients, ActionFunc, AmountOfOps) ->
     ModeAtom = aspike_nif_test:get_api_mode(default),
-    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
+    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOps, ModeAtom]),
     lists:map(fun(ProcNumber) ->
         spawn(fun() ->
-            Counter = AmountOfOpsToDo * ProcNumber,
+            Counter = AmountOfOps * ProcNumber,
             ProcName = integer_to_list(ProcNumber),
             StartTime = erlang:system_time(microsecond),
-            Results = stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
+            Results = stress_test_runner_loop(ProcName, ActionFunc, AmountOfOps, Counter, 0, 0),
             EndTime = erlang:system_time(microsecond),
-            TimePerAction = (EndTime - StartTime) div AmountOfOpsToDo,
+            TimePerAction = (EndTime - StartTime) div AmountOfOps,
             {OpsDone, ErrorsMet} = Results,
-            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerAction}}}
+            collector ! {load_finished, {1, {ProcName, AmountOfOps, OpsDone, ErrorsMet, TimePerAction}}}
         end)
     end, lists:seq(1, AmountOfClients)).
 
 stress_test_runner_loop(_, _, 0, _, Oks, Errs) -> {Oks, Errs};
 
-stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Errs) ->
+stress_test_runner_loop(ProcName, ActionFunc, AmountOfOps, Counter, Oks, Errs) ->
     Result = ActionFunc(Counter),
 
     {OpsDone, ErrorsMet} = case Result of
@@ -74,14 +74,14 @@ stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Err
             {Oks, Errs + 1}
     end,
 
-    stress_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo - 1, Counter + 1, OpsDone, ErrorsMet).
+    stress_test_runner_loop(ProcName, ActionFunc, AmountOfOps - 1, Counter + 1, OpsDone, ErrorsMet).
 
-memory_leak_test(ActionFunc, AmountOfRequests, AmountOfClients) ->
+memory_leak_test(ActionFunc, AmountOfOps, AmountOfClients) ->
     collector ! {test_starts, AmountOfClients},
     receive
         collector_ack -> ok
     end,
-    memory_leak_test_runner(AmountOfClients, ActionFunc, AmountOfRequests),
+    memory_leak_test_runner(AmountOfClients, ActionFunc, AmountOfOps),
     receive
         collection_done -> ok
     end,
@@ -98,25 +98,25 @@ memory_leak_test(ActionFunc, AmountOfRequests, AmountOfClients) ->
             collector ! clear_stats
     end.
 
-memory_leak_test_runner(AmountOfClients, ActionFunc, AmountOfOpsToDo) ->
+memory_leak_test_runner(AmountOfClients, ActionFunc, AmountOfOps) ->
     ModeAtom = aspike_nif_test:get_api_mode(default),
-    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOpsToDo, ModeAtom]),
+    io:format("Starting ~p clients each with ~p operations in ~p mode ...~n", [AmountOfClients, AmountOfOps, ModeAtom]),
     lists:map(fun(ProcNumber) ->
         spawn(fun() ->
-            Counter = AmountOfOpsToDo * ProcNumber,
+            Counter = AmountOfOps * ProcNumber,
             ProcName = integer_to_list(ProcNumber),
             StartTime = erlang:system_time(microsecond),
-            Results = memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, 0, 0),
+            Results = memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOps, Counter, 0, 0),
             EndTime = erlang:system_time(microsecond),
-            TimePerAction = (EndTime - StartTime) div AmountOfOpsToDo,
+            TimePerAction = (EndTime - StartTime) div AmountOfOps,
             {OpsDone, ErrorsMet} = Results,
-            collector ! {load_finished, {1, {ProcName, AmountOfOpsToDo, OpsDone, ErrorsMet, TimePerAction}}}
+            collector ! {load_finished, {1, {ProcName, AmountOfOps, OpsDone, ErrorsMet, TimePerAction}}}
         end)
     end, lists:seq(1, AmountOfClients)).
 
 memory_leak_test_runner_loop(_, _, 0, _, Oks, Errs) -> {Oks, Errs};
 
-memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks, Errs) ->
+memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOps, Counter, Oks, Errs) ->
     Result = ActionFunc(Counter),
 
     {OpsDone, ErrorsMet} = case Result of
@@ -126,7 +126,7 @@ memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo, Counter, Oks
             {Oks, Errs + 1}
     end,
 
-    memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOpsToDo - 1, Counter + 1, OpsDone, ErrorsMet).
+    memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOps - 1, Counter + 1, OpsDone, ErrorsMet).
 
 collector_start() ->
     collector_reset_stats(),
