@@ -495,8 +495,6 @@ static ERL_NIF_TERM aspike_nif_host_info(ErlNifEnv* env, int argc, const ERL_NIF
 }
 
 static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
-    CHECK_ALL
-
     int64_t outdated_ts = unix_ts() - 2 * 15;
 
     // Get global statistics
