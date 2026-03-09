@@ -123,6 +123,7 @@ You might want to edit function `stress_test()` to define some parameters. The m
 - **ActionFunc** - the test function which defined what to do on each 'Operation'. Basically you want to keep it as simple as possible, like one operation per time, but you can add combination of command, like cdt_put followed by cdt_get. And if you do this keep in mind that Aerospike may be running in eventual consistency mode (check your mode by reading Aerospike docs how to do that). The function defined in `ActionFunc` accepts `Counter` variable which allows you to build unique primary key or any other data to be distinct from the other operation.
 - **TestName** - variable defines so called 'test name', but basically it's going to be the name of the JSON file.
 
+
 ### Memory leak test
 You can use next function:
 ```erlang
