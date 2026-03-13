@@ -24,7 +24,7 @@ else ifeq ($(UNAME_SYS), Linux)
 	CFLAGS ?= -O3 -std=c99 -finline-functions -Wall -Wmissing-prototypes
 	CXXFLAGS ?= -O3 -finline-functions -Wall
 endif
-CXXFLAGS += -std=c++11
+CXXFLAGS += -std=c++17
 
 # use aerospike client explicit build artifacts
 AERO_BASE := $(AERO_BASE)/target/$(shell uname)-$(shell uname -m)

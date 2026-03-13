@@ -32,8 +32,6 @@
 #include <utility>
 #include <vector>
 #include <memory>
-#include <mutex>
-#include <unordered_map>
 
 #include "aspike_nif.h"
 #include "common_methods.h"
@@ -45,9 +43,6 @@ using namespace std;
 extern atomic<uint32_t> async_current_counter;
 extern atomic<uint32_t> async_peak_counter;
 extern atomic<int64_t> async_peak_ttl_counter;
-
-extern unordered_map<string, shared_ptr<NodeConnectionStats>> node_stats_map;
-extern mutex node_stats_mutex;
 
 // Helper functions (defined in aspike_nif.cpp)
 extern const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);

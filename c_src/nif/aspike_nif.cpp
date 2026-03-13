@@ -12,7 +12,7 @@
 #include <atomic>
 #include <memory>
 #include <unordered_map>
-#include <mutex>
+#include <shared_mutex>
 
 #include <aerospike/aerospike.h>
 #include <aerospike/aerospike_info.h>
@@ -63,7 +63,7 @@ atomic<int64_t> async_peak_ttl_counter(0);
 
 // Thread-safe storage using node name as key
 static unordered_map<string, shared_ptr<NodeConnectionStats>> node_stats_map;
-static mutex node_stats_mutex; // Mutex for thread-safe map access
+static shared_mutex node_stats_rw_mutex; // Reader-writer mutex for thread-safe map access
 
 aerospike* get_aerospike () { return &as; }
 bool get_is_connected () { return is_connected; }
@@ -127,16 +127,19 @@ const as_node* get_target_node_for_key(const char* namespace_name, const char* s
     return target_node;
 }
 
-// Get or create stats for a node (thread-safe)
+// Get or create stats for a node (thread-safe with reader-writer lock)
 shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name) {
-    // Fast path: check without mutex first (common case after cluster initialization)
-    auto it = node_stats_map.find(node_name);
-    if (it != node_stats_map.end()) {
-        return it->second;
-    }
+    // Fast path: shared lock for reading (multiple threads can access simultaneously)
+    {
+        shared_lock<shared_mutex> read_lock(node_stats_rw_mutex);
+        auto it = node_stats_map.find(node_name);
+        if (it != node_stats_map.end()) {
+            return it->second;  // Found it! Multiple readers can do this concurrently
+        }
+    } // Shared lock released here
 
-    // Slow path: not found, acquire mutex to create new entry
-    lock_guard<mutex> lock(node_stats_mutex);
+    // Slow path: exclusive lock for writing (only one thread can do this)
+    lock_guard<shared_mutex> write_lock(node_stats_rw_mutex);
 
     // Double-check: another thread might have created it while we waited for the lock
     auto it2 = node_stats_map.find(node_name);
@@ -522,27 +525,30 @@ static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, c
     uint32_t host_async_current_max = 0;
     uint32_t host_async_peak_max = 0;
 
-    // No lock needed for read-only iteration through stable map
-    for (const auto& pair : node_stats_map) {
-        const auto& stats = pair.second;
+    // Use shared lock for safe read-only iteration (allows concurrent readers)
+    {
+        shared_lock<shared_mutex> read_lock(node_stats_rw_mutex);
+        for (const auto& pair : node_stats_map) {
+            const auto& stats = pair.second;
 
-        if (!stats) {
-            continue; // Skip invalid entries
-        }
+            if (!stats) {
+                continue; // Skip invalid entries
+            }
 
-        uint32_t node_async_peak = stats->async_peak.load();
-    
-        if (host_async_peak_max < node_async_peak) {
-            host_async_current_max = stats->async_current.load();
-            host_async_peak_max = node_async_peak;
-        }
+            uint32_t node_async_peak = stats->async_peak.load();
 
-        // Check if the peak values are outdated for this node and reset them if needed
-        if (node_async_peak > 0 && stats->async_peak_ttl.load() < outdated_ts) {
-            stats->async_current.store(0);
-            stats->async_peak.store(0);
+            if (host_async_peak_max < node_async_peak) {
+                host_async_current_max = stats->async_current.load();
+                host_async_peak_max = node_async_peak;
+            }
+
+            // Check if the peak values are outdated for this node and reset them if needed
+            if (node_async_peak > 0 && stats->async_peak_ttl.load() < outdated_ts) {
+                stats->async_current.store(0);
+                stats->async_peak.store(0);
+            }
         }
-    }
+    } // Shared lock released here
 
     ERL_NIF_TERM worse_host_stats = enif_make_tuple2(env,
         enif_make_uint(env, host_async_current_max),
