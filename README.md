@@ -110,6 +110,8 @@ aspike_nif_test:mp_reads(40, 1_000_000, 0).
 It will run 10 concurrent insert processes, each will insert 1000000 keys, with 0ms delay
 and 20 concurrent read processes, each will read 1000000 keys with 0ms delay.
 
+### Stress-testing
+
 To run the stress test with different amount of clients you may use function
 ```erlang
 aspike_nif_test:stress_test().

@@ -2,11 +2,23 @@
 
 %% API
 -export([
+    get_test_date_from_counter/1,
     stress_test_loop/4,
     memory_leak_test/3,
     collector_start/0,
     compare_cdt_data/2
 ]).
+
+get_test_date_from_counter(Counter) ->
+    RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
+    MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
+    MapKey2 = <<<<"key2_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Value3 = <<<<"value3_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Value4 = <<<<"value4_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
+    Bins = [{MapKey1, [Value1, Value2, Counter]}, {MapKey2, [Value3, Value4, Counter]}],
+    {RecordKeyName, Bins, {MapKey1, Value1, Value2}, {MapKey2, Value3, Value4}}.
 
 stress_test_loop(TestName, _, _, []) ->
     collector ! send_stats,

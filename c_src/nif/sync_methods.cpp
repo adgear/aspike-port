@@ -44,10 +44,6 @@ extern atomic<uint32_t> sync_current_counter;
 extern atomic<uint32_t> sync_peak_counter;
 extern atomic<int64_t> sync_peak_ttl_counter;
 
-// Helper functions (defined in aspike_nif.cpp)
-extern const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);
-extern shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name);
-
 // RAII helper for automatically managing sync operation counters
 class SyncOperationCounter {
 public:

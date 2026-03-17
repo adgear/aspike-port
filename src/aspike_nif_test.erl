@@ -84,10 +84,10 @@ quick_test() ->
         {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<0, 1, 0, 2, 3>>, 345, <<"map_key_2_2">>, <<0, 1, 0, 2, 4>>, 678]}
     ],
 
-    InsertRes = cdt_put(Namespace, SetName, PrimaryKey, DataToInsert, 300, ?ASPIKE_DEFAULT_POLICY),
+    InsertRes = cdt_put(Namespace, SetName, PrimaryKey, DataToInsert, 300),
     io:format("cdt_put result:~n~p~n~n", [InsertRes]),
 
-    ReadRes = cdt_get(Namespace, SetName, PrimaryKey, ?ASPIKE_DEFAULT_POLICY),
+    ReadRes = cdt_get(Namespace, SetName, PrimaryKey),
     io:format("cdt_get result:~n~p~n~n", [ReadRes]),
     case ReadRes of
         {ok, ReadData} ->
@@ -98,6 +98,31 @@ quick_test() ->
         {error, Error} ->
             io:format("Read error happened: ~p.~n", [Error])
     end,
+
+    % Test cdt_delete_by_keys async functionality
+    io:format("Testing cdt_delete_by_keys async...~n", []),
+    BinName = <<"fcap_map_1">>,
+    KeysToDelete = [<<"map_key_1_1">>, <<"map_key_1_2">>],
+    DeleteRes = cdt_delete_by_keys(Namespace, SetName, PrimaryKey, BinName, KeysToDelete),
+    io:format("cdt_delete_by_keys result:~n~p~n~n", [DeleteRes]),
+
+    % Read again to verify deletion
+    ReadAfterDeleteRes = cdt_get(Namespace, SetName, PrimaryKey),
+    io:format("cdt_get result after delete:~n~p~n~n", [ReadAfterDeleteRes]),
+    case ReadAfterDeleteRes of
+        {ok, ReadAfterDeleteData} ->
+            ExpectedData = [
+                {<<"fcap_map_1">>, []},
+                {<<"fcap_map_2">>, [<<"map_key_2_1">>, <<0, 1, 0, 2, 3>>, 345, <<"map_key_2_2">>, <<0, 1, 0, 2, 4>>, 678]}
+            ],
+            case aspike_nif_test_utils:compare_cdt_data(ExpectedData, ReadAfterDeleteData) of
+                true -> io:format("Read after delete successful, deleted keys are absent.~n", []);
+                false -> io:format("Read data doesn't match the expected one. Investigate why.~n", [])
+            end;
+        {error, DeleteError} ->
+            io:format("Read after delete error: ~p.~n", [DeleteError])
+    end,
+
     io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]).
 
 init_tester() ->
@@ -119,38 +144,67 @@ stress_test() ->
 
     TestNamePrefix = "local",
     AmountOfOps = 10_000,
-    Command = cdt_put,
+    %Command = cdt_put,
     %Command = cdt_get,
+    Command = cdt_delete_by_keys,
     AmountsOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
+    %AmountsOfClients = [1],
 
     Namespace = <<"test">>,
     SetName = <<"test_set">>,
     ActionFunc = case Command of
         cdt_put ->
             fun(Counter) ->
-                RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
-                MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
-                Bins = [{MapKey1, [Value1, Value2, Counter]}],
+                {RecordKeyName, Bins, _, _} = aspike_nif_test_utils:get_test_date_from_counter(Counter),
                 % in seconds, 10 * 60 means 10 minutes
                 TTL = 10 * 60,
-                cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, ?ASPIKE_DEFAULT_POLICY)
+                cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL)
             end;
         cdt_get ->
             fun(Counter) ->
-                RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Result = cdt_get(Namespace, SetName, RecordKeyName, ?ASPIKE_DEFAULT_POLICY),
-                % now we do some validation
+                % NOTE: this test will be fail in sync mode because of the bug with insertion
+                % of two keys into a map - only 1 key will be added to a map
+                {RecordKeyName, Bins, {MapKey1, Value1, Value2}, {MapKey2, Value3, Value4}} = aspike_nif_test_utils:get_test_date_from_counter(Counter),
+
+                % first, insert data
+                % in seconds
+                TTL = 10,
+                cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL),
+
+                % now read data back and validate
+                Result = cdt_get(Namespace, SetName, RecordKeyName),
                 case Result of
                     {error, _} -> Result;
                     {ok, Data} ->
-                        MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                        Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                        Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
                         case Data of
-                            [{MapKey1, [Value1, {Value2, _,_}]}] -> Result;
+                            [{MapKey2, [Value3, {Value4,_,_}]}, {MapKey1, [Value1, {Value2,_,_}]}] -> Result;
                             _ -> {error, <<"cdt_get() doesn't match data put by cdt_put()">>}
+                        end
+                end
+            end;
+        cdt_delete_by_keys ->
+            fun(Counter) ->
+                % NOTE: this test will be fail in sync mode because of the bug with insertion
+                % of two keys into a map - only 1 key will be added to a map
+                {RecordKeyName, _, {MapKey1, Value1, Value2}, {MapKey2, Value3, Value4}} = aspike_nif_test_utils:get_test_date_from_counter(Counter),
+
+                % first, insert data
+                Bins = [{MapKey1, [Value1, Value2, Counter, Value3, Value4, Counter]}, {MapKey2, [Value3, Value4, Counter]}],
+                % in seconds
+                TTL = 10,
+                cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL),
+
+                % then, delete some keys from the map
+                cdt_delete_by_keys(Namespace, SetName, RecordKeyName, MapKey1, [Value1]),
+
+                % now read data back and validate
+                Result = cdt_get(Namespace, SetName, RecordKeyName),
+                case Result of
+                    {error, _} -> Result;
+                    {ok, Data} ->
+                        case Data of
+                            [{MapKey2, [Value3, {Value4,_,_}]}, {MapKey1, [Value3, {Value4,_,_}]}] -> Result;
+                            _ -> {error, <<"cdt_get() doesn't match data after cdt_delete_by_keys()">>}
                         end
                 end
             end
@@ -172,33 +226,18 @@ memory_leak_test() ->
     Namespace = <<"test">>,
     SetName = <<"test_set">>,
     ActionFunc = fun(Counter) ->
-        RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
-        MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
-        Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-        Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
-        Bins = [{MapKey1, [Value1, Value2, Counter]}],
+        {RecordKeyName, Bins, {MapKey1, Value1, _}, _} = aspike_nif_test_utils:get_test_date_from_counter(Counter),
         % No need to keep the record longger than 5 seconds
-        TTL = 5,
-        cdt_put(Namespace, SetName, RecordKeyName, Bins, TTL, ?ASPIKE_DEFAULT_POLICY),
-
-        Result = cdt_get(Namespace, SetName, RecordKeyName, ?ASPIKE_DEFAULT_POLICY),
-
-        % now we do some validation
-        case Result of
-            {error, _} -> Result;
-            {ok, Data} ->
-                MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-                Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
-                case Data of
-                    [{MapKey1, [Value1, {Value2, _,_}]}] -> Result;
-                    _ -> {error, <<"cdt_get() doesn't match data put by cdt_put()">>}
-                end
-        end
+        cdt_put(Namespace, SetName, RecordKeyName, Bins, 5),
+        cdt_get(Namespace, SetName, RecordKeyName),
+        cdt_delete_by_keys(Namespace, SetName, RecordKeyName, MapKey1, [Value1])
      end,
 
     aspike_nif_test_utils:memory_leak_test(ActionFunc, AmountOfOps, AmountOfClients),
     ok.
+
+cdt_put(Namespace, Set, RecordKeyName, BinList, TTL) ->
+    cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, ?ASPIKE_DEFAULT_POLICY).
 
 cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
     case get_api_mode(cdt_put) of
@@ -211,6 +250,9 @@ cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
             call_aerospike_async_nif(AsyncCmd)
     end.
 
+cdt_get(Namespace, Set, RecordKeyName) ->
+    cdt_get(Namespace, Set, RecordKeyName, ?ASPIKE_DEFAULT_POLICY).
+
 cdt_get(Namespace, Set, RecordKeyName, Policy) ->
     case get_api_mode(cdt_get) of
         sync ->
@@ -220,9 +262,16 @@ cdt_get(Namespace, Set, RecordKeyName, Policy) ->
             call_aerospike_async_nif(AsyncCmd)
     end.
 
-cdt_delete_by_keys(Namespace, Set, Key, BinName, SubkeysList) ->
-    % there is only sync version of this operation right now
-    aspike_nif:cdt_delete_by_keys(Namespace, Set, Key, BinName, SubkeysList).
+cdt_delete_by_keys(Namespace, Set, RecordKeyName, BinName, SubkeysList) ->
+    case get_api_mode(cdt_delete_by_keys) of
+        sync ->
+            aspike_nif:cdt_delete_by_keys_sync(Namespace, Set, RecordKeyName, BinName, SubkeysList);
+        async ->
+            AsyncCmd = fun() ->
+                aspike_nif:cdt_delete_by_keys_async(Namespace, Set, RecordKeyName, BinName, SubkeysList)
+                       end,
+            call_aerospike_async_nif(AsyncCmd)
+    end.
 
 cdt_delete_by_keys_batch(Namespace, Set, BinName, KeysSubkeysList) ->
     % there is only sync version of this operation right now
