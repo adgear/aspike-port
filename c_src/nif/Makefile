@@ -23,6 +23,7 @@ else ifeq ($(UNAME_SYS), Linux)
 	CC ?= gcc
 	CFLAGS ?= -O3 -std=c99 -finline-functions -Wall -Wmissing-prototypes
 	CXXFLAGS ?= -O3 -finline-functions -Wall
+	#CXXFLAGS ?= -g -O0 -finline-functions -Wall
 endif
 CXXFLAGS += -std=c++17
 
@@ -30,7 +31,7 @@ CXXFLAGS += -std=c++17
 AERO_BASE := $(AERO_BASE)/target/$(shell uname)-$(shell uname -m)
 
 CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
-CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include -g
+CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR) -I$(AERO_BASE)/include
 
 LDLIBS += $(AERO_BASE)/lib/libaerospike.a
 LDLIBS += -L$(ERL_INTERFACE_LIB_DIR) -lei

@@ -2,48 +2,49 @@
 
 %% API
 -export([
-    get_test_date_from_counter/1,
+    get_test_data_from_counter/1,
     stress_test_loop/4,
     memory_leak_test/3,
     collector_start/0,
     compare_cdt_data/2
 ]).
 
-get_test_date_from_counter(Counter) ->
+get_test_data_from_counter(Counter) ->
     RecordKeyName = <<<<"user_">>/binary, (integer_to_binary(Counter))/binary>>,
-    MapKey1 = <<<<"key1_">>/binary, (integer_to_binary(Counter))/binary>>,
-    Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
-    Value2 = <<<<"value2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
-    MapKey2 = <<<<"key2_">>/binary, (integer_to_binary(Counter))/binary>>,
-    Value3 = <<<<"value3_">>/binary, (integer_to_binary(Counter))/binary>>,
-    Value4 = <<<<"value4_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
-    Bins = [{MapKey1, [Value1, Value2, Counter]}, {MapKey2, [Value3, Value4, Counter]}],
-    {RecordKeyName, Bins, {MapKey1, Value1, Value2}, {MapKey2, Value3, Value4}}.
+    BinName1 = <<<<"bn1_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Key1 = <<<<"key_1_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Value1 = <<<<"value_1_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
+    BinName2 = <<<<"bn2_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Key2 = <<<<"Key_2_">>/binary, (integer_to_binary(Counter))/binary>>,
+    Value2 = <<<<"Value_2_">>/binary, <<0, 1, 0>>/binary, (integer_to_binary(Counter))/binary>>,
+    {RecordKeyName, {BinName1, Key1, Value1}, {BinName2, Key2, Value2}}.
 
-stress_test_loop(TestName, _, _, []) ->
+stress_test_loop(_TestName, _, _, []) ->
     collector ! send_stats,
     receive
-        {ok, Stats} ->
+        {ok, _Stats} ->
+            %% I commented out saving data to JSON fle because we don't need it anymore
+
             %io:format("~nStats: ~p~n~n", [Stats]),
-            StatByMode = maps:get(by_mode, Stats),
-            ModeAtom = aspike_nif_test:get_api_mode(default),
-            DataOfThisMode = maps:get(ModeAtom, StatByMode),
-            JSON = lists:join("", [
-                "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
-                lists:join(", ", lists:map(fun(Data) ->
-                    {AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet} = Data,
-                    io_lib:format("{\"clients\": ~p, \"amountOfOps\": ~p, \"min\": ~p, \"max\": ~p, \"avg\": ~p, \"done\": ~p, \"failed\": ~p}",
-                        [AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet]
-                    )
-                end, DataOfThisMode)),
-                "]}"
-            ]),
-            io:format("JSON: ~s~n", [JSON]),
-            FileName = string:replace(TestName, " ", "_", all) ++ ".json",
-            {ok, FileDesc} = file:open(FileName, [write]),
-            file:write(FileDesc, JSON),
-            file:close(FileDesc),
-            io:format("Saved results to file: ~s~n", [FileName]),
+            %%StatByMode = maps:get(by_mode, Stats),
+            %%ModeAtom = aspike_nif_test:get_api_mode(default),
+            %%DataOfThisMode = maps:get(ModeAtom, StatByMode),
+            %%JSON = lists:join("", [
+            %%    "{\"title\": \"" ++ TestName ++ "\", \"data\": [",
+            %%    lists:join(", ", lists:map(fun(Data) ->
+            %%        {AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet} = Data,
+            %%        io_lib:format("{\"clients\": ~p, \"amountOfOps\": ~p, \"min\": ~p, \"max\": ~p, \"avg\": ~p, \"done\": ~p, \"failed\": ~p}",
+            %%            [AmountOfClients, AmountOfOps, Min, Max, Avg, OpsDone, ErrorsMet]
+            %%        )
+            %%    end, DataOfThisMode)),
+            %%    "]}"
+            %%]),
+            %%io:format("JSON: ~s~n", [JSON]),
+            %%FileName = string:replace(TestName, " ", "_", all) ++ ".json",
+            %%{ok, FileDesc} = file:open(FileName, [write]),
+            %%file:write(FileDesc, JSON),
+            %%file:close(FileDesc),
+            %%io:format("Saved results to file: ~s~n", [FileName]),
             collector ! clear_stats
     end;
 
@@ -77,7 +78,11 @@ stress_test_runner(AmountOfClients, ActionFunc, AmountOfOps) ->
 stress_test_runner_loop(_, _, 0, _, Oks, Errs) -> {Oks, Errs};
 
 stress_test_runner_loop(ProcName, ActionFunc, AmountOfOps, Counter, Oks, Errs) ->
-    Result = ActionFunc(Counter),
+    Result = try ActionFunc(Counter) of
+        Res -> Res
+    catch
+        throw:Error -> Error
+    end,
 
     {OpsDone, ErrorsMet} = case Result of
         {ok, _} -> {Oks + 1, Errs};
@@ -134,7 +139,6 @@ memory_leak_test_runner_loop(ProcName, ActionFunc, AmountOfOps, Counter, Oks, Er
     {OpsDone, ErrorsMet} = case Result of
         {ok, _} -> {Oks + 1, Errs};
         {error, _ErrorMessage} ->
-            %io:format("~s: got error: ~s~n", [ProcName, ErrorMessage]),
             {Oks, Errs + 1}
     end,
 
@@ -240,7 +244,7 @@ collector_process_results(Stats) ->
     io:format("Amount of parallel clients: ~p~n", [AmountOfClients]),
     io:format("Amount of operations per client: ~p~n", [OpsPerClient]),
     io:format("Min: ~p µs, Max: ~p µs, Avg: ~p µs~n", [Min, Max, Avg]),
-    PercentOfFailed = round((ErrorsMet / (OpsDone + OpsPerClient)) * 100),
+    PercentOfFailed = round((ErrorsMet / (OpsPerClient * AmountOfClients)) * 100),
     io:format("Total successful ops: ~p, Total failed ops: ~p (~p % from total)~n", [OpsDone, ErrorsMet, PercentOfFailed]),
 
     Stats = erlang:get(collector_stats),
@@ -286,11 +290,31 @@ compare_maps(_, _) ->
 %% Internal function to compare map values
 %% Insert values (flattened): [<<"map_key_1_1">>, <<0,1,0,2,1>>, 123, <<"map_key_1_2">>, <<0,1,0,2,2>>, 456]
 %% Read values (with timestamps): [<<"map_key_1_1">>, {<<0,1,0,2,1>>,123,Timestamp}, <<"map_key_1_2">>, {<<0,1,0,2,2>>,456,Timestamp}]
-%% We need to compare flattened insert data with tuple read data, ignoring timestamps
-compare_map_values([], []) ->
-    true;
-compare_map_values([Key, Bin, Num | InsertRest], [Key, {Bin, Num, _ReadTimestamp} | ReadRest]) ->
-    % Compare key, binary, and number; ignore timestamp from read data
-    compare_map_values(InsertRest, ReadRest);
-compare_map_values(_, _) ->
-    false.
+%% We need to compare flattened insert data with tuple read data, ignoring timestamps and order
+compare_map_values(InsertValues, ReadValues) ->
+    try
+        % Convert insert values to key-value pairs
+        InsertPairs = extract_insert_pairs(InsertValues, []),
+        % Convert read values to key-value pairs (ignoring timestamps)
+        ReadPairs = extract_read_pairs(ReadValues, []),
+        % Sort both lists and compare
+        lists:sort(InsertPairs) =:= lists:sort(ReadPairs)
+    catch
+        _:_ -> false
+    end.
+
+%% Helper function to extract key-value pairs from flattened insert data
+extract_insert_pairs([], Acc) ->
+    lists:reverse(Acc);
+extract_insert_pairs([Key, Bin, Num | Rest], Acc) ->
+    extract_insert_pairs(Rest, [{Key, {Bin, Num}} | Acc]);
+extract_insert_pairs(_, _) ->
+    throw(invalid_format).
+
+%% Helper function to extract key-value pairs from read data (with timestamps)
+extract_read_pairs([], Acc) ->
+    lists:reverse(Acc);
+extract_read_pairs([Key, {Bin, Num, _Timestamp} | Rest], Acc) ->
+    extract_read_pairs(Rest, [{Key, {Bin, Num}} | Acc]);
+extract_read_pairs(_, _) ->
+    throw(invalid_format).
