@@ -93,11 +93,11 @@ void decrement_async_connection_counter_with_node(const string& node_name) {
 struct callback_data {
     ErlNifPid caller_pid; // Erlang process to send result to
     ErlNifEnv* erl_env = nullptr; // NIF environment
-    vector<as_cdt_ctx*> cdt_contexts;
-    string* node_name = nullptr;
-    as_batch_records* batch_records = nullptr;
+    vector<as_cdt_ctx*>* cdt_context_vector = nullptr;
     vector<as_arraylist>* arraylist_vector = nullptr;
     vector<as_operations>* operations_vector = nullptr;
+    string* node_name = nullptr;
+    as_batch_records* batch_records = nullptr;
     as_arraylist* arraylist = nullptr;
     as_operations* operations = nullptr;
     as_key* record_key = nullptr;
@@ -127,6 +127,12 @@ struct callback_data {
             }
             delete operations_vector;
         }
+        if (cdt_context_vector) {
+            for (auto cdt_ctx : *cdt_context_vector) {
+                as_cdt_ctx_destroy(cdt_ctx);
+            }
+            delete cdt_context_vector;
+        }
         if (arraylist) {
             as_arraylist_destroy(arraylist);
         }
@@ -138,9 +144,6 @@ struct callback_data {
         }
         if (erl_env) {
             enif_free_env(erl_env);
-        }
-        for (auto cdt_ctx : cdt_contexts) {
-            as_cdt_ctx_destroy(cdt_ctx);
         }
         if (node_name) {
             delete node_name;
@@ -312,11 +315,14 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     auto record_key = new as_key();
     as_key_init_str(record_key, name_space.c_str(), set_name.c_str(), record_primary_key.c_str());
 
+    auto cdt_contexts = new vector<as_cdt_ctx*>();
+
     // Now allocate callback data with proper initialization
     callback_data* cb_data = new callback_data(env, node_name);
     cb_data->caller_pid = caller_pid;
     cb_data->operations = operations;
     cb_data->record_key = record_key;
+    cb_data->cdt_context_vector = cdt_contexts;
 
     for (uint i = 0; i < bins_amount; i++) {
         // each bin of
@@ -377,7 +383,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 // this map
                 as_cdt_ctx* context = as_cdt_ctx_create(1);
                 // save context for later removal
-                cb_data->cdt_contexts.push_back(context);
+                cdt_contexts->push_back(context);
                 // getting first level key name
                 ErlNifBinary erl_key_name;
                 if (enif_inspect_binary(env, data_head, &erl_key_name)) {
@@ -406,7 +412,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     memcpy(copy_on_heap, erl_value_data.data, erl_value_data.size);
                     as_bytes* value_data = as_bytes_new_wrap(copy_on_heap, erl_value_data.size, true);
                     // next line creates a key 'value' in the map we created above in 'opnum == 1'
-                    as_operations_map_put(operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)value_data);
+                    as_operations_map_put(operations, bin_name.c_str(), cdt_contexts->back(), &put_mode, (as_val*)key_name, (as_val*)value_data);
                 }
                 opnum++;
             } else if (opnum == 2) {
@@ -418,7 +424,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                     as_string* key_name = as_string_new_strdup("ttl");
                     as_integer* ttl_value = as_integer_new(i64);
                     // next line creates a key 'ttl' in the map we created above in 'opnum == 1'
-                    as_operations_map_put(operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)ttl_value);
+                    as_operations_map_put(operations, bin_name.c_str(), cdt_contexts->back(), &put_mode, (as_val*)key_name, (as_val*)ttl_value);
                 }
 
                 // let's create a 'wt' key on second-level map
@@ -428,7 +434,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
                 long timestamp = chrono::duration_cast<chrono::seconds>(now).count();
                 as_integer* wt_value = as_integer_new(timestamp);
                 // next line creates a key 'wt' in the map we created above in 'opnum == 1'
-                as_operations_map_put(operations, bin_name.c_str(), cb_data->cdt_contexts.back(), &put_mode, (as_val*)key_name, (as_val*)wt_value);
+                as_operations_map_put(operations, bin_name.c_str(), cdt_contexts->back(), &put_mode, (as_val*)key_name, (as_val*)wt_value);
 
                 opnum = 0;
             } else {

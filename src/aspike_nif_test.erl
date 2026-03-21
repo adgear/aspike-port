@@ -144,10 +144,10 @@ stress_test() ->
 
     TestNamePrefix = "local",
     AmountOfOps = 10_000,
-    %Command = cdt_put,
+    Command = cdt_put,
     %Command = cdt_get,
     %Command = cdt_delete_by_keys,
-    Command = cdt_delete_by_keys_batch,
+    %Command = cdt_delete_by_keys_batch,
     AmountsOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
     %AmountsOfClients = [20],
 
