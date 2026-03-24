@@ -16,6 +16,7 @@
     host_list/0,
     set_connections_per_node/4,
     set_event_loops_amount/1,
+    enable_statistic_collection/1,
     connect/0,
     connect/2,
     get_connections_stats/0,
@@ -79,6 +80,7 @@
     nif_host_list/0,
     set_connections_per_node/4,
     set_event_loops_amount/1,
+    enable_statistic_collection/1,
     connect/2,
     get_connections_stats/0,
     key_exists/3,
@@ -184,6 +186,11 @@ set_connections_per_node(_SyncMinConn, _SyncMaxConn, _AsyncMinConn, _AsyncMaxCon
 
 -spec set_event_loops_amount(integer()) -> {ok, string()} | {error, string()}.
 set_event_loops_amount(_EventLoopsAmount) ->
+    not_loaded(?LINE).
+
+% send number 1 into this function if you want to enable it, and any other number to disable
+-spec enable_statistic_collection(integer()) -> {ok, string()} | {error, string()}.
+enable_statistic_collection(_Enabled) ->
     not_loaded(?LINE).
 
 connect() ->

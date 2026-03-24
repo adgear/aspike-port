@@ -221,6 +221,19 @@ static ERL_NIF_TERM aspike_nif_set_event_loops_amount(ErlNifEnv* env, int argc, 
     return enif_make_tuple2(env, erl_ok, msg);
 }
 
+static ERL_NIF_TERM aspike_nif_enable_statistic_collection(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    int enabled;
+    if (!enif_get_int(env, argv[0], &enabled)) {
+	    return enif_make_badarg(env);
+    }
+
+    statistics_enabled = enabled == 1;
+
+    ERL_NIF_TERM msg = enif_make_string(env, "set", ERL_NIF_UTF8);
+    return enif_make_tuple2(env, erl_ok, msg);
+}
+
 static ERL_NIF_TERM aspike_nif_as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     if (!as_event_create_loops(event_loops_amount)) {
@@ -609,6 +622,7 @@ static ErlNifFunc nif_funcs[] = {
 
     {"set_connections_per_node", 4, aspike_nif_set_connections_per_node},
     {"set_event_loops_amount", 1, aspike_nif_set_event_loops_amount},
+    {"enable_statistic_collection", 1, aspike_nif_enable_statistic_collection},
     {"as_init", 0, aspike_nif_as_init},
     {"nif_host_add", 2, aspike_nif_host_add},
     {"host_clear", 0, aspike_nif_host_clear},
