@@ -99,12 +99,13 @@ quick_test() ->
             io:format("Read error happened: ~p.~n", [Error])
     end,
 
-    % Test cdt_delete_by_keys async functionality
-    io:format("Testing cdt_delete_by_keys async...~n", []),
+    % Test cdt_delete_by_keys functionality
+    io:format("Testing cdt_delete_by_keys ...~n", []),
     BinName = <<"profile">>,
     KeysToDelete = [<<"first_name">>, <<"last_name">>],
     DeleteRes = cdt_delete_by_keys(Namespace, SetName, PK1, BinName, KeysToDelete),
     io:format("cdt_delete_by_keys result:~n~p~n~n", [DeleteRes]),
+    {ok, "keys_deleted"} = DeleteRes,
 
     % Read again to verify deletion
     ReadAfterDeleteRes = cdt_get(Namespace, SetName, PK1),
@@ -122,6 +123,10 @@ quick_test() ->
         {error, DeleteError} ->
             io:format("Read after delete error: ~p.~n", [DeleteError])
     end,
+
+    cdt_put(Namespace, SetName, PK1, [{<<"profile">>, [<<"first_name">>, <<"John">>, 123, <<"last_name">>, <<"Smith">>, 456]}], 300),
+    BinReadRes = cdt_get_bin(Namespace, SetName, PK1, <<"profile">>),
+    io:format("Bin from cdt_get_bin: ~p.~n", [BinReadRes]),
 
     io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]).
 
@@ -341,6 +346,15 @@ cdt_get(Namespace, Set, RecordKeyName, Policy) ->
             aspike_nif:cdt_get_sync(Namespace, Set, RecordKeyName, Policy);
         async ->
             AsyncCmd = fun() -> aspike_nif:cdt_get_async(Namespace, Set, RecordKeyName, Policy) end,
+            call_aerospike_async_nif(AsyncCmd)
+    end.
+
+cdt_get_bin(Namespace, Set, RecordKeyName, BinName) ->
+    case get_api_mode(cdt_get_bin) of
+        sync ->
+            aspike_nif:cdt_get_bin_sync(Namespace, Set, RecordKeyName, BinName);
+        async ->
+            AsyncCmd = fun() -> aspike_nif:cdt_get_bin_async(Namespace, Set, RecordKeyName, BinName) end,
             call_aerospike_async_nif(AsyncCmd)
     end.
 

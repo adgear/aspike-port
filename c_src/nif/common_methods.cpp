@@ -161,7 +161,7 @@ ERL_NIF_TERM aspike_format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                 long fccount = 0;
                 const as_val* val = as_orderedmap_iterator_next(&it);
                 as_pair* apr = as_pair_fromval(val);
-                erl_list.push_back(aspike_get_binary_asval(env, as_pair_1(apr)));
+                erl_list.push_back(aspike_get_binary_from_asval(env, as_pair_1(apr)));
 
                 const as_orderedmap* vmap = (const as_orderedmap*)as_map_fromval(as_pair_2(apr));
                 as_orderedmap_iterator iti_int;
@@ -173,7 +173,7 @@ ERL_NIF_TERM aspike_format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                     const as_val* valsm = as_orderedmap_iterator_next(&iti_int);
                     as_pair* aprsm = as_pair_fromval(valsm);
                     if (as_pair_2(aprsm)->type == 9) {
-                        vnt = aspike_get_binaryb_asval(env, as_pair_2(aprsm));
+                        vnt = aspike_get_binary_from_asval(env, as_pair_2(aprsm));
                         fccount++;
                     } else if (as_pair_2(aprsm)->type == 3) {
                         auto smkey = as_string_get((as_string*)as_pair_1(aprsm));
@@ -184,7 +184,7 @@ ERL_NIF_TERM aspike_format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
                         }
                         fccount++;
                     } else if (as_pair_2(aprsm)->type == 4) {
-                        vnt = aspike_get_binary_asval(env, as_pair_2(aprsm));
+                        vnt = aspike_get_binary_from_asval(env, as_pair_2(aprsm));
                         fccount++;
                     }
                 }
@@ -209,59 +209,75 @@ ERL_NIF_TERM aspike_format_value_out(ErlNifEnv* env, as_val_t type, as_bin_value
 }
 
 ERL_NIF_TERM aspike_dump_cdt_records(ErlNifEnv* env, const as_record* p_rec) {
-    ERL_NIF_TERM res;
     if (p_rec->key.valuep) {
-        unsigned char* key_data;
-        char* key_val_as_str = as_val_tostring(p_rec->key.valuep);
-        auto len = strlen(key_val_as_str);
+        char* record_key = as_val_tostring(p_rec->key.valuep);
+        auto len = strlen(record_key);
 
-        key_data = enif_make_new_binary(env, len, &res);
-        memcpy(key_data, key_val_as_str, len);
-        // res = enif_make_string(env, key_val_as_str, ERL_NIF_UTF8);
-        cf_free(key_val_as_str);
-        return res;
+        ERL_NIF_TERM erl_record_key;
+        unsigned char* datap = enif_make_new_binary(env, len, &erl_record_key);
+        memcpy(datap, record_key, len);
+        cf_free(record_key);
+        return erl_record_key;
     }
 
     as_record_iterator it;
     as_record_iterator_init(&it, p_rec);
-    res = enif_make_list(env, 0);
+    ERL_NIF_TERM erl_list = enif_make_list(env, 0);
 
     while (as_record_iterator_has_next(&it)) {
         const as_bin* p_bin = as_record_iterator_next(&it);
         char* name = as_bin_get_name(p_bin);
         auto namelen = strlen(name);
-        uint type = as_bin_get_type(p_bin);
+        uint bin_type = as_bin_get_type(p_bin);
 
         unsigned char* name_data;
-        ERL_NIF_TERM name_term;
-        name_data = enif_make_new_binary(env, namelen, &name_term);
+        ERL_NIF_TERM erl_bin_name;
+        name_data = enif_make_new_binary(env, namelen, &erl_bin_name);
         memcpy(name_data, name, namelen);
 
-        ERL_NIF_TERM typeTerm = aspike_format_value_out(env, type, as_bin_get_value(p_bin));
-        ERL_NIF_TERM cell = enif_make_tuple2(env, name_term, typeTerm);
-        res = enif_make_list_cell(env, cell, res);
+        ERL_NIF_TERM erl_bin_content = aspike_format_value_out(env, bin_type, as_bin_get_value(p_bin));
+        ERL_NIF_TERM cell = enif_make_tuple2(env, erl_bin_name, erl_bin_content);
+        erl_list = enif_make_list_cell(env, cell, erl_list);
     }
 
     as_record_iterator_destroy(&it);
-    return res;
+    return erl_list;
 }
 
-ERL_NIF_TERM aspike_get_binary_asval(ErlNifEnv* env, const as_val * val) {
-    ERL_NIF_TERM fcap_key;
-    as_string *keystr = as_string_fromval(val);
-    auto len = as_string_len(keystr);
-    unsigned char * val_data;
-    val_data = enif_make_new_binary(env, len, &fcap_key);
-    memcpy(val_data, as_string_get(keystr), len);
-    return fcap_key;
-}
+#define RETURN_EMPTY_ERL_STR { ERL_NIF_TERM empty; enif_make_new_binary(env, 0, &empty); return empty; }
 
-ERL_NIF_TERM aspike_get_binaryb_asval(ErlNifEnv* env, const as_val * val) {
-    ERL_NIF_TERM fcap_key;
-    as_bytes *keystr = as_bytes_fromval(val);
-    auto len = as_bytes_size(keystr);
-    unsigned char * val_data;
-    val_data = enif_make_new_binary(env, len, &fcap_key);
-    memcpy(val_data, as_bytes_get(keystr), len);
-    return fcap_key;
+// Anyone using function aspike_get_binary_from_asval doesn't expect to get problems. 
+// What if the data you are reading has type you don't expect ? You expect to read string,
+// but instead the as_val points to a map. SIGSEGV is a result.
+// So it's possible to write wrong data under some specific key or bin and crash the process
+// which reads that key. The current solution is to return empty string as this is what is being
+// expected. 
+ERL_NIF_TERM aspike_get_binary_from_asval(ErlNifEnv* env, const as_val * val) {
+    ERL_NIF_TERM erl_value;
+    if (!val) RETURN_EMPTY_ERL_STR
+    auto val_type = as_val_type(val);
+    char * data;
+    unsigned int len;
+    if (val_type == AS_STRING) {
+        as_string *str_p = as_string_fromval(val);
+        if (!str_p) RETURN_EMPTY_ERL_STR
+        len = as_string_len(str_p);
+        if (!len) RETURN_EMPTY_ERL_STR
+        data = as_string_get(str_p);
+    } else if (val_type == AS_BYTES) {
+        as_bytes *bytes = as_bytes_fromval(val);
+        if (!bytes) RETURN_EMPTY_ERL_STR
+        len = as_bytes_size(bytes);
+        if (!len) RETURN_EMPTY_ERL_STR
+        data = (char *)as_bytes_get(bytes);
+    } else {
+        RETURN_EMPTY_ERL_STR
+    }
+    
+    if (!data) RETURN_EMPTY_ERL_STR
+    
+    unsigned char * erl_bin = enif_make_new_binary(env, len, &erl_value);
+    memcpy(erl_bin, data, len);
+    
+    return erl_value;
 }

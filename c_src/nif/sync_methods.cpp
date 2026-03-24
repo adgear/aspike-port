@@ -528,11 +528,6 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
     vector<ERL_NIF_TERM> erl_list;
     for (auto aitr : abwrs) {
         erl_list.push_back(enif_make_int(env, aitr->result));
-        /*if(aitr->result == AEROSPIKE_OK){
-            cout << "WOPOK! \r\n";
-        }else{
-            cout << "WOPNOK!: " << to_string(aitr->result) << "\r\n";
-        }*/
     }
     auto opsl = enif_make_list_from_array(env, erl_list.data(), erl_list.size());
 
@@ -551,7 +546,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
     }
 }
 
-ERL_NIF_TERM aspike_nif_segment_tag_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+ERL_NIF_TERM aspike_nif_cdt_get_bin_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_error = get_erl_error();
@@ -640,8 +635,8 @@ ERL_NIF_TERM aspike_nif_segment_tag_get_sync(ErlNifEnv* env, int argc, const ERL
         uint32_t idx = 0;
         while (as_orderedmap_iterator_has_next(&it)) {
             as_pair* pair = as_pair_fromval(as_orderedmap_iterator_next(&it));
-            keys[idx] = aspike_get_binary_asval(env, as_pair_1(pair));
-            vals[idx] = aspike_get_binary_asval(env, as_pair_2(pair));
+            keys[idx] = aspike_get_binary_from_asval(env, as_pair_1(pair));
+            vals[idx] = aspike_get_binary_from_asval(env, as_pair_2(pair));
             idx++;
         }
         as_orderedmap_iterator_destroy(&it);
