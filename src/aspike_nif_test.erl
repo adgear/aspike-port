@@ -128,7 +128,9 @@ quick_test() ->
     BinReadRes = cdt_get_bin(Namespace, SetName, PK1, <<"profile">>),
     io:format("Bin from cdt_get_bin: ~p.~n", [BinReadRes]),
 
-    io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]).
+    io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]),
+
+    halt().
 
 init_tester() ->
     case whereis(tester) of
@@ -331,8 +333,8 @@ cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
         sync ->
             aspike_nif:cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy);
         async ->
-            AsyncCmd = fun() ->
-                aspike_nif:cdt_put_async(Namespace, Set, RecordKeyName, BinList, TTL, Policy)
+            AsyncCmd = fun(Ref) ->
+                aspike_nif:cdt_put_async(Ref, Namespace, Set, RecordKeyName, BinList, TTL, Policy)
                        end,
             call_aerospike_async_nif(AsyncCmd)
     end.
@@ -345,7 +347,7 @@ cdt_get(Namespace, Set, RecordKeyName, Policy) ->
         sync ->
             aspike_nif:cdt_get_sync(Namespace, Set, RecordKeyName, Policy);
         async ->
-            AsyncCmd = fun() -> aspike_nif:cdt_get_async(Namespace, Set, RecordKeyName, Policy) end,
+            AsyncCmd = fun(Ref) -> aspike_nif:cdt_get_async(Ref, Namespace, Set, RecordKeyName, Policy) end,
             call_aerospike_async_nif(AsyncCmd)
     end.
 
@@ -354,7 +356,7 @@ cdt_get_bin(Namespace, Set, RecordKeyName, BinName) ->
         sync ->
             aspike_nif:cdt_get_bin_sync(Namespace, Set, RecordKeyName, BinName);
         async ->
-            AsyncCmd = fun() -> aspike_nif:cdt_get_bin_async(Namespace, Set, RecordKeyName, BinName) end,
+            AsyncCmd = fun(Ref) -> aspike_nif:cdt_get_bin_async(Ref, Namespace, Set, RecordKeyName, BinName) end,
             call_aerospike_async_nif(AsyncCmd)
     end.
 
@@ -363,8 +365,8 @@ cdt_delete_by_keys(Namespace, Set, RecordKeyName, BinName, SubkeysList) ->
         sync ->
             aspike_nif:cdt_delete_by_keys_sync(Namespace, Set, RecordKeyName, BinName, SubkeysList);
         async ->
-            AsyncCmd = fun() ->
-                aspike_nif:cdt_delete_by_keys_async(Namespace, Set, RecordKeyName, BinName, SubkeysList)
+            AsyncCmd = fun(Ref) ->
+                aspike_nif:cdt_delete_by_keys_async(Ref, Namespace, Set, RecordKeyName, BinName, SubkeysList)
                        end,
             call_aerospike_async_nif(AsyncCmd)
     end.
@@ -374,32 +376,50 @@ cdt_delete_by_keys_batch(Namespace, Set, BinName, KeysToRemove) ->
         sync ->
             aspike_nif:cdt_delete_by_keys_batch_sync(Namespace, Set, BinName, KeysToRemove);
         async ->
-            AsyncCmd = fun() ->
-                aspike_nif:cdt_delete_by_keys_batch_async(Namespace, Set, BinName, KeysToRemove)
+            AsyncCmd = fun(Ref) ->
+                aspike_nif:cdt_delete_by_keys_batch_async(Ref, Namespace, Set, BinName, KeysToRemove)
                        end,
             call_aerospike_async_nif(AsyncCmd)
     end.
 
 call_aerospike_async_nif(AsyncCmd) ->
+    % Generate a unique reference for this async operation
+    Ref = make_ref(),
 
     % we define time to wait (TTW) much higher compare to prod values
     % because dev machines are not so powerful. Value in milliseconds.
     TTW = 1000,
 
-    case AsyncCmd() of
+    case AsyncCmd(Ref) of
         {ok, in_progress} ->
-            receive
-                {ok, Response} ->
-                    {ok, Response};
-                {error, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} ->
-                    {error, ErrorMessage}
-            after TTW ->
-                {error, <<"timeout waiting for the response from aerospike">>}
-            end;
+            receive_with_ref_filter(Ref, TTW);
         {ok, Response} ->
             {ok, Response};
         {error, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} ->
             {error, ErrorMessage}
+    end.
+
+% Helper function to receive messages with reference filtering
+receive_with_ref_filter(ExpectedRef, TTW) ->
+    receive
+        {ok, ReceivedRef, Response} when ReceivedRef =:= ExpectedRef ->
+            {ok, Response};
+        {error, ReceivedRef, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} when ReceivedRef =:= ExpectedRef ->
+            {error, ErrorMessage};
+        % Handle messages with wrong references (stale messages)
+        {ok, WrongRef, _} when WrongRef =/= ExpectedRef ->
+            % This is a stale message from a previous operation, ignore it
+            io:format("Received wrong REF (~p) on OK response. I was expecting ~p~n", [WrongRef, ExpectedRef]),
+            receive_with_ref_filter(ExpectedRef, TTW);
+        {error, WrongRef, {_, _, _}} when WrongRef =/= ExpectedRef ->
+            io:format("Received wrong REF (~p) on Error response. I was expecting ~p~n", [WrongRef, ExpectedRef]),
+            % This is a stale error message from a previous operation, ignore it
+            receive_with_ref_filter(ExpectedRef, TTW);
+        _Other ->
+            % Unknown message format, ignore and continue
+            receive_with_ref_filter(ExpectedRef, TTW)
+    after TTW ->
+        {error, <<"timeout waiting for the response from aerospike">>}
     end.
 
 cdt_del_test(0, _, _, _, _) -> ok;

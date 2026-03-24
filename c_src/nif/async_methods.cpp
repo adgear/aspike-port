@@ -39,28 +39,18 @@
 
 using namespace std;
 
-const char * NO_PID_STR = "Failed to get caller PID";
-#define CHECK_PID ErlNifPid caller_pid; \
-if (!enif_self(env, &caller_pid)) { \
-    auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_NO_CALLER_ID); \
-    auto aspikeErrorCode = enif_make_int(env, AEROSPIKE_OK); \
-    auto message = enif_make_string(env, NO_PID_STR, ERL_NIF_UTF8); \
-    return enif_make_tuple2(env, erl_error, enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, message)); \
-}
-
-
 // External references to atomic parallel connection counters
 extern atomic<uint32_t> async_current_counter;
 extern atomic<uint32_t> async_peak_counter;
 extern atomic<int64_t> async_peak_ttl_counter;
 
 // Helper functions (defined in aspike_nif.cpp)
-extern const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);
-extern shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name);
+extern string * get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str);
+extern shared_ptr<NodeConnectionStats> get_or_create_node_stats(string* node_name);
 
-void increment_async_connection_counter_with_node(char * node_name) {
+void increment_async_connection_counter_with_node(string * node_name) {
     if (!node_name) return;
-    auto node_stats = get_or_create_node_stats(string(node_name));
+    auto node_stats = get_or_create_node_stats(node_name);
 
     // Increment both global and per-node counters
     async_current_counter.fetch_add(1);
@@ -83,16 +73,24 @@ void increment_async_connection_counter_with_node(char * node_name) {
     }
 }
 
-void decrement_async_connection_counter_with_node(const string& node_name) {
+void decrement_async_connection_counter_with_node(string* node_name) {
     async_current_counter.fetch_sub(1);
     auto node_stats = get_or_create_node_stats(node_name);
     node_stats->async_current.fetch_sub(1);
 }
 
+#define PREP_CALLBACK \
+ErlNifPid caller_pid; \
+enif_self(env, &caller_pid); \
+auto new_env = enif_alloc_env(); \
+auto erl_ref_copy = enif_make_copy(new_env, argv[0]); \
+auto cb_data = new callback_data(new_env, caller_pid, erl_ref_copy);
+
 // Async callback structure for async operations
 struct callback_data {
-    ErlNifPid caller_pid; // Erlang process to send result to
-    ErlNifEnv* erl_env = nullptr; // NIF environment
+    ErlNifEnv* erl_env = nullptr;
+    ErlNifPid caller_pid;
+    ERL_NIF_TERM ref;
     vector<as_cdt_ctx*>* cdt_context_vector = nullptr;
     vector<as_arraylist>* arraylist_vector = nullptr;
     vector<as_operations>* operations_vector = nullptr;
@@ -103,12 +101,10 @@ struct callback_data {
     as_operations* operations = nullptr;
     as_key* record_key = nullptr;
 
-    callback_data(ErlNifEnv* env, const char* node_name_to_save) {
-        erl_env = enif_alloc_env();
-
-        if (node_name_to_save) {
-            node_name = new string(node_name_to_save);
-        }
+    callback_data(ErlNifEnv* new_env, ErlNifPid caller, ERL_NIF_TERM ref_to_save) {
+        erl_env = new_env;
+        caller_pid = caller;
+        ref = ref_to_save;
     }
 
     ~callback_data() {
@@ -156,14 +152,14 @@ struct callback_data {
 };
 
 static void cdt_put_async_callback(as_error* err, as_record* record, void* udata, as_event_loop* event_loop) {
-    ERL_NIF_TERM erl_ok = get_erl_ok();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM result_msg;
-
     callback_data* cb_data = (callback_data*)udata;
 
+    ERL_NIF_TERM erl_ok = enif_make_atom(cb_data->erl_env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(cb_data->erl_env, "error");
+    ERL_NIF_TERM result_msg;
+
     if (cb_data->node_name) {
-        decrement_async_connection_counter_with_node(*cb_data->node_name);
+        decrement_async_connection_counter_with_node(cb_data->node_name);
     }
 
     if (err) {
@@ -184,10 +180,10 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
         auto aspikeErrorCode = enif_make_int(cb_data->erl_env, err->code);
         ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->erl_env, nifErrorCode, aspikeErrorCode, error_msg);
 
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_error, error_tuple);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_error, cb_data->ref, error_tuple);
     } else {
         ERL_NIF_TERM response = enif_make_string(cb_data->erl_env, "put", ERL_NIF_UTF8);
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_ok, response);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_ok, cb_data->ref, response);
     }
 
     enif_send(NULL, &cb_data->caller_pid, cb_data->erl_env, result_msg);
@@ -197,17 +193,20 @@ static void cdt_put_async_callback(as_error* err, as_record* record, void* udata
 ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
 
     ErlNifBinary erl_namespace, erl_set_name, erl_record_name;
-    if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
+    if (!enif_is_ref(env, argv[0])) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+    if (!enif_inspect_binary(env, argv[1], &erl_namespace)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[2], &erl_record_name)) {
+    if (!enif_inspect_binary(env, argv[2], &erl_set_name)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_inspect_binary(env, argv[3], &erl_record_name)) {
         return enif_make_badarg(env);
     }
 
@@ -216,7 +215,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     string record_name((const char*)erl_record_name.data, erl_record_name.size);
 
     unsigned int bins_amount;
-    ERL_NIF_TERM bins = argv[3];
+    ERL_NIF_TERM bins = argv[4];
     if (!enif_is_list(env, bins) || !enif_get_list_length(env, bins, &bins_amount)) {
         return enif_make_badarg(env);
     }
@@ -229,7 +228,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     }
 
     long ttl;
-    if (!enif_get_long(env, argv[4], &ttl)) {
+    if (!enif_get_long(env, argv[5], &ttl)) {
         return enif_make_badarg(env);
     }
 
@@ -238,7 +237,7 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     long max_retries = 0;
     long socket_timeout = 0;
     long total_timeout = 0;
-    int policyReadRC = enif_get_tuple(env, argv[5], &policy_length, &erl_policy);
+    int policyReadRC = enif_get_tuple(env, argv[6], &policy_length, &erl_policy);
     if (!policyReadRC || policy_length != 4) {
         return enif_make_badarg(env);
     }
@@ -292,27 +291,20 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
         operations->ttl = -2;
     }
 
-    CHECK_PID
     CHECK_ALL
 
     as_map_policy put_mode;
     as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
-    // Determine target node for this key
-    char * node_name = nullptr;
-    const as_node* target_node = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
-    if (target_node) {
-        node_name = (char *)target_node->name;
-    }
+    auto node_name = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     auto record_key = new as_key();
     as_key_init_str(record_key, name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     auto cdt_contexts = new vector<as_cdt_ctx*>();
 
-    // Now allocate callback data with proper initialization
-    callback_data* cb_data = new callback_data(env, node_name);
-    cb_data->caller_pid = caller_pid;
+    PREP_CALLBACK
+    cb_data->node_name = node_name;
     cb_data->operations = operations;
     cb_data->record_key = record_key;
     cb_data->cdt_context_vector = cdt_contexts;
@@ -467,14 +459,15 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 }
 
 static void cdt_get_async_callback(as_error* err, as_record* record, void* udata, as_event_loop* event_loop) {
-    ERL_NIF_TERM erl_ok = get_erl_ok();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM result_msg;
-
     callback_data* cb_data = (callback_data*)udata;
 
+    ERL_NIF_TERM erl_ok = enif_make_atom(cb_data->erl_env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(cb_data->erl_env, "error");
+    ERL_NIF_TERM result_msg;
+
+
     if (cb_data->node_name) {
-        decrement_async_connection_counter_with_node(*cb_data->node_name);
+        decrement_async_connection_counter_with_node(cb_data->node_name);
     }
 
     if (err) {
@@ -495,10 +488,10 @@ static void cdt_get_async_callback(as_error* err, as_record* record, void* udata
         auto aspikeErrorCode = enif_make_int(cb_data->erl_env, err->code);
         ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->erl_env, nifErrorCode, aspikeErrorCode, error_msg);
 
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_error, error_tuple);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_error, cb_data->ref, error_tuple);
     } else {
         ERL_NIF_TERM response = aspike_dump_cdt_records(cb_data->erl_env, record);
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_ok, response);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_ok, cb_data->ref, response);
     }
 
     enif_send(NULL, &cb_data->caller_pid, cb_data->erl_env, result_msg);
@@ -508,17 +501,20 @@ static void cdt_get_async_callback(as_error* err, as_record* record, void* udata
 ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
 
     ErlNifBinary erl_namespace, erl_set_name, erl_record_name;
-    if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
+    if (!enif_is_ref(env, argv[0])) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+    if (!enif_inspect_binary(env, argv[1], &erl_namespace)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[2], &erl_record_name)) {
+    if (!enif_inspect_binary(env, argv[2], &erl_set_name)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_inspect_binary(env, argv[3], &erl_record_name)) {
         return enif_make_badarg(env);
     }
     
@@ -531,7 +527,7 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     long max_retries = 0;
     long socket_timeout = 0;
     long total_timeout = 0;
-    int policyReadRC = enif_get_tuple(env, argv[3], &policy_length, &erl_policy);
+    int policyReadRC = enif_get_tuple(env, argv[4], &policy_length, &erl_policy);
     if (!policyReadRC || policy_length != 4) {
         return enif_make_badarg(env);
     }
@@ -545,22 +541,15 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     policy.base.socket_timeout = socket_timeout;
     policy.base.total_timeout = total_timeout;
 
-    CHECK_PID
     CHECK_ALL
 
-    // Determine target node for this key
-    char * node_name = nullptr;
-    const as_node* target_node = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
-    if (target_node) {
-        node_name = (char *)target_node->name;
-    }
+    auto node_name = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     auto record_key = new as_key();
     as_key_init_str(record_key, name_space.c_str(), set_name.c_str(), record_name.c_str());
 
-    // Now allocate callback data with proper initialization
-    callback_data* cb_data = new callback_data(env, node_name);
-    cb_data->caller_pid = caller_pid;
+    PREP_CALLBACK
+    cb_data->node_name = node_name;
     cb_data->record_key = record_key;
 
     as_error err;
@@ -591,14 +580,15 @@ ERL_NIF_TERM aspike_nif_cdt_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 }
 
 static void cdt_delete_by_keys_async_callback(as_error* err, as_record* record, void* udata, as_event_loop* event_loop) {
-    ERL_NIF_TERM erl_ok = get_erl_ok();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM result_msg;
-
     callback_data* cb_data = (callback_data*)udata;
 
+    ERL_NIF_TERM erl_ok = enif_make_atom(cb_data->erl_env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(cb_data->erl_env, "error");
+    ERL_NIF_TERM result_msg;
+
+
     if (cb_data->node_name) {
-        decrement_async_connection_counter_with_node(*cb_data->node_name);
+        decrement_async_connection_counter_with_node(cb_data->node_name);
     }
 
     if (err) {
@@ -619,10 +609,10 @@ static void cdt_delete_by_keys_async_callback(as_error* err, as_record* record, 
         auto aspikeErrorCode = enif_make_int(cb_data->erl_env, err->code);
         ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->erl_env, nifErrorCode, aspikeErrorCode, error_msg);
 
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_error, error_tuple);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_error, cb_data->ref, error_tuple);
     } else {
         ERL_NIF_TERM response = enif_make_string(cb_data->erl_env, "keys_deleted", ERL_NIF_UTF8);
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_ok, response);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_ok, cb_data->ref, response);
     }
 
     enif_send(NULL, &cb_data->caller_pid, cb_data->erl_env, result_msg);
@@ -632,30 +622,31 @@ static void cdt_delete_by_keys_async_callback(as_error* err, as_record* record, 
 ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
 
     ErlNifBinary erl_ns, erl_set_name, erl_record_name, erl_bin_name;
-    if (!enif_inspect_binary(env, argv[0], &erl_ns)) {
+    if (!enif_is_ref(env, argv[0])) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+    if (!enif_inspect_binary(env, argv[1], &erl_ns)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[2], &erl_record_name)) {
+    if (!enif_inspect_binary(env, argv[2], &erl_set_name)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[3], &erl_bin_name)) {
+    if (!enif_inspect_binary(env, argv[3], &erl_record_name)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_inspect_binary(env, argv[4], &erl_bin_name)) {
         return enif_make_badarg(env);
     }
 
-    ERL_NIF_TERM list = argv[4];
+    ERL_NIF_TERM list = argv[5];
     unsigned int length;
     if (!enif_is_list(env, list) || !enif_get_list_length(env, list, &length)) {
         return enif_make_badarg(env);
     }
-
-    CHECK_PID
 
     CHECK_ALL
 
@@ -664,12 +655,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_async(ErlNifEnv* env, int argc, const
     string record_name((const char*)erl_record_name.data, erl_record_name.size);
     string bin_name((const char*)erl_bin_name.data, erl_bin_name.size);
 
-    // Determine target node for this key
-    char * node_name = nullptr;
-    const as_node* target_node = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
-    if (target_node) {
-        node_name = (char *)target_node->name;
-    }
+    auto node_name = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     auto remove_list = new as_arraylist();
     as_arraylist_init(remove_list, length, length);
@@ -708,9 +694,8 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_async(ErlNifEnv* env, int argc, const
         as_operations_add_map_remove_by_key_list(ops, bin_name.c_str(), (as_list*)remove_list, AS_MAP_RETURN_NONE);
     }
 
-    // Now allocate callback data with proper initialization
-    callback_data* cb_data = new callback_data(env, node_name);
-    cb_data->caller_pid = caller_pid;
+    PREP_CALLBACK
+    cb_data->node_name = node_name;
     cb_data->operations = ops;
     cb_data->arraylist = remove_list;
     cb_data->record_key = record_key;
@@ -743,11 +728,12 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_async(ErlNifEnv* env, int argc, const
 }
 
 void cdt_delete_by_keys_batch_async_callback(as_error* err, as_batch_records* records, void* udata, as_event_loop* event_loop) {
-    ERL_NIF_TERM erl_ok = get_erl_ok();
-    ERL_NIF_TERM erl_error = get_erl_error();
+    callback_data* cb_data = (callback_data*)udata;
+
+    ERL_NIF_TERM erl_ok = enif_make_atom(cb_data->erl_env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(cb_data->erl_env, "error");
     ERL_NIF_TERM result_msg;
 
-    callback_data* cb_data = (callback_data*)udata;
 
     if (err && err->code != AEROSPIKE_OK) {
         ERL_NIF_TERM error_msg;
@@ -765,7 +751,7 @@ void cdt_delete_by_keys_batch_async_callback(as_error* err, as_batch_records* re
         auto aspikeErrorCode = enif_make_int(cb_data->erl_env, err->code);
         ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->erl_env, nifErrorCode, aspikeErrorCode, error_msg);
 
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_error, error_tuple);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_error, cb_data->ref, error_tuple);
     } else {
         vector<ERL_NIF_TERM> erl_list;
         for (uint32_t i = 0; i < records->list.size; i++) {
@@ -773,7 +759,7 @@ void cdt_delete_by_keys_batch_async_callback(as_error* err, as_batch_records* re
             erl_list.push_back(enif_make_int(cb_data->erl_env, record->result));
         }
         auto result_list = enif_make_list_from_array(cb_data->erl_env, erl_list.data(), erl_list.size());
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_ok, result_list);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_ok, cb_data->ref, result_list);
     }
 
     enif_send(NULL, &cb_data->caller_pid, cb_data->erl_env, result_msg);
@@ -783,20 +769,23 @@ void cdt_delete_by_keys_batch_async_callback(as_error* err, as_batch_records* re
 ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
 
     ErlNifBinary erl_ns, erl_set_name, erl_bin_name;
-    if (!enif_inspect_binary(env, argv[0], &erl_ns)) {
+    if (!enif_is_ref(env, argv[0])) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+    if (!enif_inspect_binary(env, argv[1], &erl_ns)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[2], &erl_bin_name)) {
+    if (!enif_inspect_binary(env, argv[2], &erl_set_name)) {
         return enif_make_badarg(env);
     }
-    ERL_NIF_TERM erl_tuples = argv[3];
+    if (!enif_inspect_binary(env, argv[3], &erl_bin_name)) {
+        return enif_make_badarg(env);
+    }
+    ERL_NIF_TERM erl_tuples = argv[4];
     unsigned int tuples_amount;
     if (!enif_is_list(env, erl_tuples) || !enif_get_list_length(env, erl_tuples, &tuples_amount)) {
         return enif_make_badarg(env);
@@ -843,8 +832,6 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_async(ErlNifEnv* env, int argc,
         }
         erl_current_list = erl_tail;
     }
-
-    CHECK_PID
 
     CHECK_ALL
 
@@ -899,8 +886,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_async(ErlNifEnv* env, int argc,
         erl_current_list = erl_tail;
     }
 
-    callback_data* cb_data = new callback_data(env, nullptr);
-    cb_data->caller_pid = caller_pid;
+    PREP_CALLBACK
     cb_data->batch_records = recs;
     cb_data->arraylist_vector = map_keys;
     cb_data->operations_vector = delete_ops;
@@ -937,14 +923,15 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_async(ErlNifEnv* env, int argc,
 }
 
 void cdt_get_bin_async_callback(as_error* err, as_record* records, void* udata, as_event_loop* event_loop) {
-    ERL_NIF_TERM erl_ok = get_erl_ok();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM result_msg;
-
     callback_data* cb_data = (callback_data*)udata;
 
+    ERL_NIF_TERM erl_ok = enif_make_atom(cb_data->erl_env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(cb_data->erl_env, "error");
+    ERL_NIF_TERM result_msg;
+
+
     if (cb_data->node_name) {
-        decrement_async_connection_counter_with_node(*cb_data->node_name);
+        decrement_async_connection_counter_with_node(cb_data->node_name);
     }
 
     if (err) {
@@ -965,7 +952,7 @@ void cdt_get_bin_async_callback(as_error* err, as_record* records, void* udata, 
         auto aspikeErrorCode = enif_make_int(cb_data->erl_env, err->code);
         ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->erl_env, nifErrorCode, aspikeErrorCode, error_msg);
 
-        result_msg = enif_make_tuple2(cb_data->erl_env, erl_error, error_tuple);
+        result_msg = enif_make_tuple3(cb_data->erl_env, erl_error, cb_data->ref, error_tuple);
     } else {
 
         try {
@@ -1017,13 +1004,13 @@ void cdt_get_bin_async_callback(as_error* err, as_record* records, void* udata, 
                 enif_make_map_from_arrays(cb_data->erl_env, keys, values, map_size, &response);
             }
 
-            result_msg = enif_make_tuple2(cb_data->erl_env, erl_ok, response);
+            result_msg = enif_make_tuple3(cb_data->erl_env, erl_ok, cb_data->ref, response);
         } catch (char * reason) {
             auto nifErrorCode = enif_make_int(cb_data->erl_env, ASPIKE_NIF_OK);
             auto aspikeErrorCode = enif_make_int(cb_data->erl_env, int(AEROSPIKE_ERR));
             ERL_NIF_TERM error_msg = enif_make_string(cb_data->erl_env, reason, ERL_NIF_UTF8);
             ERL_NIF_TERM error_tuple = enif_make_tuple3(cb_data->erl_env, nifErrorCode, aspikeErrorCode, error_msg);
-            result_msg = enif_make_tuple2(cb_data->erl_env, erl_error, error_tuple);
+            result_msg = enif_make_tuple3(cb_data->erl_env, erl_error, cb_data->ref, error_tuple);
         }
     }
 
@@ -1034,24 +1021,25 @@ void cdt_get_bin_async_callback(as_error* err, as_record* records, void* udata, 
 ERL_NIF_TERM aspike_nif_cdt_get_bin_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
 
     ErlNifBinary erl_ns, erl_set_name, erl_record_name, erl_bin_name;
-    if (!enif_inspect_binary(env, argv[0], &erl_ns)) {
+    if (!enif_is_ref(env, argv[0])) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+    if (!enif_inspect_binary(env, argv[1], &erl_ns)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[2], &erl_record_name)) {
+    if (!enif_inspect_binary(env, argv[2], &erl_set_name)) {
         return enif_make_badarg(env);
     }
-    if (!enif_inspect_binary(env, argv[3], &erl_bin_name)) {
+    if (!enif_inspect_binary(env, argv[3], &erl_record_name)) {
         return enif_make_badarg(env);
     }
-
-    CHECK_PID
+    if (!enif_inspect_binary(env, argv[4], &erl_bin_name)) {
+        return enif_make_badarg(env);
+    }
 
     CHECK_ALL
 
@@ -1060,21 +1048,15 @@ ERL_NIF_TERM aspike_nif_cdt_get_bin_async(ErlNifEnv* env, int argc, const ERL_NI
     string record_name((const char*)erl_record_name.data, erl_record_name.size);
     auto bin_name = new string((const char*)erl_bin_name.data, erl_bin_name.size);
 
-    // Determine target node for this key
-    char * node_name = nullptr;
-    const as_node* target_node = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
-    if (target_node) {
-        node_name = (char *)target_node->name;
-    }
+    auto node_name = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     auto record_key = new as_key();
     as_key_init_str(record_key, name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     const char* bins_to_read[] = {(*bin_name).c_str(), NULL};
 
-    callback_data* cb_data = new callback_data(env, node_name);
-
-    cb_data->caller_pid = caller_pid;
+    PREP_CALLBACK
+    cb_data->node_name = node_name;
     cb_data->record_key = record_key;
     cb_data->bin_name = bin_name;
 

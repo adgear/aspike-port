@@ -61,15 +61,15 @@
     binary_get/3,
     cdt_expire/4,
     cdt_delete_by_keys_sync/5,
-    cdt_delete_by_keys_async/5,
+    cdt_delete_by_keys_async/6,
     cdt_delete_by_keys_batch_sync/4,
-    cdt_delete_by_keys_batch_async/4,
+    cdt_delete_by_keys_batch_async/5,
     cdt_put_sync/6,
-    cdt_put_async/6,
+    cdt_put_async/7,
     cdt_get_sync/4,
-    cdt_get_async/4,
+    cdt_get_async/5,
     cdt_get_bin_sync/4,
-    cdt_get_bin_async/4
+    cdt_get_bin_async/5
 ]).
 
 -nifs([
@@ -101,15 +101,15 @@
     binary_get/3,
     cdt_expire/4,
     cdt_delete_by_keys_sync/5,
-    cdt_delete_by_keys_async/5,
+    cdt_delete_by_keys_async/6,
     cdt_delete_by_keys_batch_sync/4,
-    cdt_delete_by_keys_batch_async/4,
+    cdt_delete_by_keys_batch_async/5,
     cdt_put_sync/6,
-    cdt_put_async/6,
+    cdt_put_async/7,
     cdt_get_sync/4,
-    cdt_get_async/4,
+    cdt_get_async/5,
     cdt_get_bin_sync/4,
-    cdt_get_bin_async/4
+    cdt_get_bin_async/5
 ]).
 
 % -------------------------------------------------------------------------------
@@ -260,19 +260,19 @@ binary_put(_Namespace, _Set, _Key, _BinList, _TTL) ->
 cdt_put_sync(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 
--spec cdt_put_async(binary(), binary(), binary(),
+-spec cdt_put_async(reference(), binary(), binary(), binary(),
     [{binary(), binary()|integer()|[integer()]}], integer(),
     {integer(), integer(), integer(), integer()}) ->
     {ok, string() | atom()} | {error, {integer(), integer(), string()}}.
-cdt_put_async(_Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
+cdt_put_async(_Ref, _Namespace, _Set, _RecordKeyName, _BinList, _TTL, _Policy) ->
     not_loaded(?LINE).
 
 -spec cdt_get_sync(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, [{binary(), term()}]} | {error, string()}.
 cdt_get_sync(_Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
 
--spec cdt_get_async(binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
-cdt_get_async(_Namespace, _Set, _RecordKeyName, _Policy) ->
+-spec cdt_get_async(reference(), binary(), binary(), binary(), {integer(), integer(), integer(), integer()}) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
+cdt_get_async(_Ref, _Namespace, _Set, _RecordKeyName, _Policy) ->
     not_loaded(?LINE).
 
 -spec binary_remove(binary(), binary(), binary(), [binary()], integer()) ->
@@ -328,8 +328,8 @@ binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_bi
 cdt_get_bin_sync(Namespace, Set, Key, BinName) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(BinName) ->
     not_loaded(?LINE).
 
--spec cdt_get_bin_async(binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
-cdt_get_bin_async(_Namespace, _Set, _Key, _BinName) ->
+-spec cdt_get_bin_async(reference(), binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
+cdt_get_bin_async(_Ref, _Namespace, _Set, _Key, _BinName) ->
     not_loaded(?LINE).
 
 -spec cdt_expire(binary(), binary(), binary(), integer()) -> {ok, [{binary(), term()}]} | {error, string()}.
@@ -340,16 +340,16 @@ cdt_expire(Namespace, Set, Key, TTL) when is_binary(Namespace), is_binary(Set), 
 cdt_delete_by_keys_sync(Namespace, Set, RecordKeyName, BinName, SubkeysList) when is_binary(Namespace), is_binary(Set), is_binary(RecordKeyName), is_binary(BinName), is_list(SubkeysList) ->
     not_loaded(?LINE).
 
--spec cdt_delete_by_keys_async(binary(), binary(), binary(), binary(), [binary()]) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
-cdt_delete_by_keys_async(_Namespace, _Set, _RecordKeyName, _BinName, _SubkeysList) ->
+-spec cdt_delete_by_keys_async(reference(), binary(), binary(), binary(), binary(), [binary()]) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
+cdt_delete_by_keys_async(_Ref, _Namespace, _Set, _RecordKeyName, _BinName, _SubkeysList) ->
     not_loaded(?LINE).
 
 -spec cdt_delete_by_keys_batch_sync(binary(), binary(), binary(), [{binary(), [binary()]}]) -> {ok, [integer()]} | {error, string()}.
 cdt_delete_by_keys_batch_sync(Namespace, Set, BinName, KeysToRemove) when is_binary(Namespace), is_binary(Set), is_binary(BinName), is_list(KeysToRemove) ->
     not_loaded(?LINE).
 
--spec cdt_delete_by_keys_batch_async(binary(), binary(), binary(), [{binary(), [binary()]}]) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
-cdt_delete_by_keys_batch_async(_Namespace, _Set, _BinName, _KeysToRemove) ->
+-spec cdt_delete_by_keys_batch_async(reference(), binary(), binary(), binary(), [{binary(), [binary()]}]) -> {ok, atom()} | {error, {integer(), integer(), string()}}.
+cdt_delete_by_keys_batch_async(_Ref, _Namespace, _Set, _BinName, _KeysToRemove) ->
     not_loaded(?LINE).
 
 key_generation() ->

@@ -43,11 +43,14 @@ using namespace std;
 extern atomic<uint32_t> sync_current_counter;
 extern atomic<uint32_t> sync_peak_counter;
 extern atomic<int64_t> sync_peak_ttl_counter;
+extern bool get_statistics_enabled();
 
 // RAII helper for automatically managing sync operation counters
 class SyncOperationCounter {
 public:
     explicit SyncOperationCounter() {
+        if (!get_statistics_enabled()) return;
+
         sync_current_counter.fetch_add(1);
 
         auto value = sync_current_counter.load();
@@ -59,6 +62,7 @@ public:
     }
 
     ~SyncOperationCounter() {
+        if (!get_statistics_enabled()) return;
         sync_current_counter.fetch_sub(1);
     }
 
@@ -70,8 +74,8 @@ public:
 ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     unsigned int length;
@@ -258,8 +262,8 @@ ERL_NIF_TERM aspike_nif_cdt_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 ERL_NIF_TERM aspike_nif_cdt_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     string name_space, aspk_set, aspk_key;
@@ -339,8 +343,8 @@ ERL_NIF_TERM aspike_nif_cdt_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key, bin_name;
     string name_space, aspk_set, aspk_key, bin_str;
@@ -426,8 +430,8 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_sync(ErlNifEnv* env, int argc, const 
 ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_name;
     string name_space, aspk_set, aspk_key, bin_str;
@@ -549,8 +553,8 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_sync(ErlNifEnv* env, int argc, 
 ERL_NIF_TERM aspike_nif_cdt_get_bin_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key, bin_columns;
     string name_space, aspk_set, aspk_key, aspk_columns;
@@ -657,8 +661,8 @@ ERL_NIF_TERM aspike_nif_cdt_get_bin_sync(ErlNifEnv* env, int argc, const ERL_NIF
 ERL_NIF_TERM aspike_nif_key_select_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -731,8 +735,8 @@ ERL_NIF_TERM aspike_nif_key_select_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 ERL_NIF_TERM aspike_nif_binary_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     string name_space, aspk_set, aspk_key;
@@ -786,8 +790,8 @@ ERL_NIF_TERM aspike_nif_binary_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 ERL_NIF_TERM aspike_nif_key_get_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -837,8 +841,8 @@ ERL_NIF_TERM aspike_nif_key_exists_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -880,8 +884,8 @@ ERL_NIF_TERM aspike_nif_key_inc_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -956,8 +960,8 @@ ERL_NIF_TERM aspike_nif_key_generation_sync(ErlNifEnv* env, int argc, const ERL_
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -1007,8 +1011,8 @@ ERL_NIF_TERM aspike_nif_key_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -1086,8 +1090,8 @@ ERL_NIF_TERM aspike_nif_binary_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     unsigned int length;
@@ -1230,8 +1234,8 @@ ERL_NIF_TERM aspike_nif_binary_remove_sync(ErlNifEnv* env, int argc, const ERL_N
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     unsigned int length;
@@ -1318,8 +1322,8 @@ ERL_NIF_TERM aspike_nif_cdt_expire_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     ErlNifBinary bin_ns, bin_set, bin_key;
     string name_space, aspk_set, aspk_key;
@@ -1413,8 +1417,8 @@ ERL_NIF_TERM aspike_nif_key_remove_sync(ErlNifEnv* env, int argc, const ERL_NIF_
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char name_space[MAX_NAMESPACE_SIZE];
     char set[MAX_SET_SIZE];
@@ -1452,8 +1456,8 @@ ERL_NIF_TERM aspike_nif_a_key_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_T
 {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
-    ERL_NIF_TERM erl_error = get_erl_error();
-    ERL_NIF_TERM erl_ok = get_erl_ok();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
 
     char bin[AS_BIN_NAME_MAX_SIZE];
     long val;

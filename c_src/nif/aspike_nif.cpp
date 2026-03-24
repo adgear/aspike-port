@@ -67,12 +67,18 @@ static shared_mutex node_stats_rw_mutex; // Reader-writer mutex for thread-safe 
 
 aerospike* get_aerospike () { return &as; }
 bool get_is_connected () { return is_connected; }
-ERL_NIF_TERM get_erl_error () { return erl_error; }
-ERL_NIF_TERM get_erl_ok () { return erl_ok; }
+bool statistics_enabled = false;
+bool get_statistics_enabled () { return statistics_enabled; };
 
 // Get target node for a key using proper Aerospike partition routing
-const as_node* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str) {
-    if (!namespace_name || !key_str || !is_connected || !as.cluster) {
+string* get_target_node_for_key(const char* namespace_name, const char* set, const char* key_str) {
+    if (!statistics_enabled || !namespace_name || !key_str || !is_connected || !as.cluster) {
+        return nullptr;
+    }
+
+    // Use the cluster nodes API which handles reference counting internally
+    as_nodes* nodes = as_nodes_reserve(as.cluster);
+    if (!nodes) {
         return nullptr;
     }
 
@@ -83,6 +89,7 @@ const as_node* get_target_node_for_key(const char* namespace_name, const char* s
     as_error err;
     if (as_key_set_digest(&err, &key) != AEROSPIKE_OK) {
         as_key_destroy(&key);
+        as_nodes_release(nodes);
         return nullptr;
     }
 
@@ -90,6 +97,7 @@ const as_node* get_target_node_for_key(const char* namespace_name, const char* s
     as_digest* digest = as_key_digest(&key);
     if (!digest) {
         as_key_destroy(&key);
+        as_nodes_release(nodes);
         return nullptr;
     }
 
@@ -107,6 +115,7 @@ const as_node* get_target_node_for_key(const char* namespace_name, const char* s
 
     if (!table) {
         as_key_destroy(&key);
+        as_nodes_release(nodes);
         return nullptr;
     }
 
@@ -122,17 +131,23 @@ const as_node* get_target_node_for_key(const char* namespace_name, const char* s
                                                  nullptr, AS_POLICY_REPLICA_MASTER,
                                                  1, &replica_index);
 
-    as_key_destroy(&key);
+    string* node_name = nullptr;
+    if (target_node && strlen(target_node->name) > 0) {
+        node_name = new string((char *)target_node->name);
+    }
 
-    return target_node;
+    as_key_destroy(&key);
+    as_nodes_release(nodes);
+
+    return node_name;
 }
 
 // Get or create stats for a node (thread-safe with reader-writer lock)
-shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name) {
+shared_ptr<NodeConnectionStats> get_or_create_node_stats(string* node_name) {
     // Fast path: shared lock for reading (multiple threads can access simultaneously)
     {
         shared_lock<shared_mutex> read_lock(node_stats_rw_mutex);
-        auto it = node_stats_map.find(node_name);
+        auto it = node_stats_map.find(*node_name);
         if (it != node_stats_map.end()) {
             return it->second;  // Found it! Multiple readers can do this concurrently
         }
@@ -142,14 +157,14 @@ shared_ptr<NodeConnectionStats> get_or_create_node_stats(const string& node_name
     lock_guard<shared_mutex> write_lock(node_stats_rw_mutex);
 
     // Double-check: another thread might have created it while we waited for the lock
-    auto it2 = node_stats_map.find(node_name);
+    auto it2 = node_stats_map.find(*node_name);
     if (it2 != node_stats_map.end()) {
         return it2->second;
     }
 
     // Create new stats entry
     auto stats = make_shared<NodeConnectionStats>();
-    node_stats_map[node_name] = stats;
+    node_stats_map[*node_name] = stats;
     return stats;
 }
 
@@ -498,6 +513,24 @@ static ERL_NIF_TERM aspike_nif_host_info(ErlNifEnv* env, int argc, const ERL_NIF
 }
 
 static ERL_NIF_TERM aspike_nif_get_connections_stats(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+    
+    if (!statistics_enabled) {
+        ERL_NIF_TERM global_stats = enif_make_tuple6(env,
+            enif_make_uint(env, 0),
+            enif_make_uint(env, 0),
+            enif_make_uint(env, 0),
+            enif_make_uint(env, 0),
+            enif_make_uint(env, 0),
+            enif_make_uint(env, 0)
+        );
+        ERL_NIF_TERM worse_host_stats = enif_make_tuple2(env,
+            enif_make_uint(env, 0),
+            enif_make_uint(env, 0)
+        );
+        ERL_NIF_TERM combined_stats = enif_make_tuple2(env, global_stats, worse_host_stats);
+        return enif_make_tuple2(env, erl_ok, combined_stats);
+    }
+
     int64_t outdated_ts = unix_ts() - 2 * 15;
 
     // Get global statistics
@@ -590,15 +623,15 @@ static ErlNifFunc nif_funcs[] = {
     {"get_connections_stats", 0, aspike_nif_get_connections_stats},
 
     NIF_DIRTY_FUN("cdt_put_sync", 6, aspike_nif_cdt_put_sync),
-    {"cdt_put_async", 6, aspike_nif_cdt_put_async},
+    {"cdt_put_async", 7, aspike_nif_cdt_put_async},
     NIF_DIRTY_FUN("cdt_get_sync", 4, aspike_nif_cdt_get_sync),
-    {"cdt_get_async", 4, aspike_nif_cdt_get_async},
+    {"cdt_get_async", 5, aspike_nif_cdt_get_async},
     NIF_DIRTY_FUN("cdt_delete_by_keys_sync", 5, aspike_nif_cdt_delete_by_keys_sync),
-    {"cdt_delete_by_keys_async", 5, aspike_nif_cdt_delete_by_keys_async},
+    {"cdt_delete_by_keys_async", 6, aspike_nif_cdt_delete_by_keys_async},
     NIF_DIRTY_FUN("cdt_delete_by_keys_batch_sync", 4, aspike_nif_cdt_delete_by_keys_batch_sync),
-    {"cdt_delete_by_keys_batch_async", 4, aspike_nif_cdt_delete_by_keys_batch_async},
+    {"cdt_delete_by_keys_batch_async", 5, aspike_nif_cdt_delete_by_keys_batch_async},
     NIF_DIRTY_FUN("cdt_get_bin_sync", 4, aspike_nif_cdt_get_bin_sync),
-    {"cdt_get_bin_async", 4, aspike_nif_cdt_get_bin_async},
+    {"cdt_get_bin_async", 5, aspike_nif_cdt_get_bin_async},
     NIF_DIRTY_FUN("key_select", 4, aspike_nif_key_select_sync),
     NIF_DIRTY_FUN("binary_get", 3, aspike_nif_binary_get_sync),
     NIF_DIRTY_FUN("key_get", 3, aspike_nif_key_get_sync),

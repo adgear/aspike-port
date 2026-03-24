@@ -7,9 +7,6 @@
 
 using namespace std;
 
-// Forward declarations
-//typedef struct as_node_s as_node;
-
 // Per-node connection tracking structures
 struct NodeConnectionStats {
     atomic<uint32_t> async_current;
@@ -56,9 +53,8 @@ enum aspike_status {
 
 aerospike* get_aerospike ();
 bool get_is_connected ();
-ERL_NIF_TERM get_erl_error ();
-ERL_NIF_TERM get_erl_ok ();
-const as_node* get_target_node_for_key (const char* namespace_name, const char* set, const char* key_str);
-shared_ptr<NodeConnectionStats> get_or_create_node_stats (const string& node_name);
+bool get_statistics_enabled ();
+string* get_target_node_for_key (const char* namespace_name, const char* set, const char* key_str);
+shared_ptr<NodeConnectionStats> get_or_create_node_stats (string* node_name);
 
 #endif // ASPIKE_NIF_H
