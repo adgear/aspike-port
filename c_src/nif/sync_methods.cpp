@@ -1189,8 +1189,8 @@ ERL_NIF_TERM aspike_nif_binary_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_
                 }
                 // expecting list of integers
                 auto ts_list = tuple[1];
-                //as_list* as_list_ofints = (as_list *)as_arraylist_new((uint32_t)ts_length, 0);
-                as_arraylist* as_list_ofints = as_arraylist_new((uint32_t)ts_length, 0);
+                //as_list* as_list_of_ints = (as_list *)as_arraylist_new((uint32_t)ts_length, 0);
+                as_arraylist* as_list_of_ints = as_arraylist_new((uint32_t)ts_length, 0);
                 for (uint ts_i = 0; ts_i < ts_length; ts_i++) {
                     ERL_NIF_TERM ts_head;
                     ERL_NIF_TERM ts_tail;
@@ -1199,13 +1199,13 @@ ERL_NIF_TERM aspike_nif_binary_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_
                         break;
                     }
                     if(enif_get_int64(env, ts_head, &i64)){
-                        as_arraylist_append_int64(as_list_ofints, i64);
+                        as_arraylist_append_int64(as_list_of_ints, i64);
                     }
                     ts_list = ts_tail;
                 }
-                ((as_val *)as_list_ofints)->type = AS_LIST;
-                if (!as_record_set_list(&rec, bin_str.c_str(), (as_list*)as_list_ofints)) {
-                    as_list_destroy((as_list*)as_list_ofints);
+                ((as_val *)as_list_of_ints)->type = AS_LIST;
+                if (!as_record_set_list(&rec, bin_str.c_str(), (as_list*)as_list_of_ints)) {
+                    as_list_destroy((as_list*)as_list_of_ints);
                     ret_val = 1;
                 }
             }
