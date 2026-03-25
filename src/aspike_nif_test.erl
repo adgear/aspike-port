@@ -124,9 +124,15 @@ quick_test() ->
             io:format("Read after delete error: ~p.~n", [DeleteError])
     end,
 
-    cdt_put(Namespace, SetName, PK1, [{<<"profile">>, [<<"first_name">>, <<"John">>, 123, <<"last_name">>, <<"Smith">>, 456]}], 300),
-    BinReadRes = cdt_get_bin(Namespace, SetName, PK1, <<"profile">>),
-    io:format("Bin from cdt_get_bin: ~p.~n", [BinReadRes]),
+    Map = #{
+        key_one => <<"value_1">>,
+        "key_two" => <<"value_2">>,
+        <<"key_three">> => <<"value_3">>
+    },
+    MapPutResult = aspike_nif:map_put(Namespace, SetName, PK1, <<"profile2">>, 5, Map),
+    io:format("MapPutResult: ~p.~n", [MapPutResult]),
+    AsyncBinReadRes = cdt_get_bin(Namespace, SetName, PK1, <<"profile2">>),
+    io:format("Bin from cdt_get_bin: ~p.~n", [AsyncBinReadRes]),
 
     io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]),
 

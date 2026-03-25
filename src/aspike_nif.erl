@@ -60,6 +60,7 @@
     binary_put/5,
     binary_remove/5,
     binary_get/3,
+    map_put/6,
     cdt_expire/4,
     cdt_delete_by_keys_sync/5,
     cdt_delete_by_keys_async/6,
@@ -101,6 +102,7 @@
     binary_put/5,
     binary_remove/5,
     binary_get/3,
+    map_put/6,
     cdt_expire/4,
     cdt_delete_by_keys_sync/5,
     cdt_delete_by_keys_async/6,
@@ -329,6 +331,11 @@ key_get(Namespace, Set, Key) when is_list(Namespace), is_list(Set), is_list(Key)
 % Gets values of all Bin for Key in Namespace Set.
 -spec binary_get(binary(), binary(), binary()) -> {ok, [{binary(), term()}]} | {error, string()}.
 binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_binary(Key) ->
+    not_loaded(?LINE).
+
+% Puts a map into a Bin for RecordKey in Namespace Set.
+-spec map_put(binary(), binary(), binary(), binary(), integer(), map()) -> {ok, [{binary(), term()}]} | {error, string()}.
+map_put(_Namespace, _Set, _RecordKey, _BinName, _TTL, _Map) ->
     not_loaded(?LINE).
 
 -spec cdt_get_bin_sync(binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.

@@ -1527,3 +1527,172 @@ ERL_NIF_TERM aspike_nif_a_key_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_T
     enif_make_map_from_arrays(env, keys, vals, 3, &msg);
     return enif_make_tuple2(env, rc, msg);
 }
+
+ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    static aerospike* as = get_aerospike();
+    bool is_connected = get_is_connected();
+    ERL_NIF_TERM erl_error = enif_make_atom(env, "error");
+    ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
+
+    ErlNifBinary erl_namespace, erl_set_name, erl_record_name, erl_bin_name;
+    if (!enif_inspect_binary(env, argv[0], &erl_namespace)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_inspect_binary(env, argv[1], &erl_set_name)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_inspect_binary(env, argv[2], &erl_record_name)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_inspect_binary(env, argv[3], &erl_bin_name)) {
+        return enif_make_badarg(env);
+    }
+    if (!enif_is_number(env, argv[4])) {
+        return enif_make_badarg(env);
+    }
+    ERL_NIF_TERM erl_map = argv[5];
+    if (!enif_is_map(env, erl_map)) {
+	    return enif_make_badarg(env);
+    }
+    
+    CHECK_ALL
+    
+    string name_space = string((const char*)erl_namespace.data, erl_namespace.size);
+    string set_name = string((const char*)erl_set_name.data, erl_set_name.size);
+    string record_name((const char*)erl_record_name.data, erl_record_name.size);
+    string bin_name((const char*)erl_bin_name.data, erl_bin_name.size);
+    long ttl;
+    enif_get_long(env, argv[4], &ttl);
+
+
+    as_key record_key;
+    as_key_init_str(&record_key, name_space.c_str(), set_name.c_str(), record_name.c_str());
+
+    as_record rec;
+    as_record_inita(&rec, 1);
+    rec.ttl = ttl;
+
+    // Get the map size for initialization
+    size_t map_size;
+    if (!enif_get_map_size(env, erl_map, &map_size)) {
+        return enif_make_badarg(env);
+    }
+
+    // Create an ordered map to hold the Erlang map data
+    as_orderedmap as_map_data;
+    as_orderedmap_init(&as_map_data, (uint32_t)map_size);
+
+    // Iterate over the Erlang map and convert each key-value pair
+    ErlNifMapIterator iter;
+    if (enif_map_iterator_create(env, erl_map, &iter, ERL_NIF_MAP_ITERATOR_FIRST)) {
+        ERL_NIF_TERM key, value;
+
+        while (enif_map_iterator_get_pair(env, &iter, &key, &value)) {
+            // Convert key to as_val - keys can be atoms, strings (lists), or binaries
+            as_val* as_key = NULL;
+            ErlNifBinary key_binary;
+            char atom_buffer[256];
+            char string_buffer[256];
+
+            if (enif_inspect_binary(env, key, &key_binary)) {
+                // Key is a binary (<<"key">>)
+                char* key_str = (char*)malloc(key_binary.size + 1);
+                if (!key_str) {
+                    // Memory allocation failed
+                    enif_map_iterator_destroy(env, &iter);
+                    as_orderedmap_destroy(&as_map_data);
+                    return enif_make_badarg(env);
+                }
+                memcpy(key_str, key_binary.data, key_binary.size);
+                key_str[key_binary.size] = '\0';
+                as_key = (as_val*)as_string_new(key_str, true); // true means Aerospike will free the memory
+            } else if (enif_is_atom(env, key) && enif_get_atom(env, key, atom_buffer, sizeof(atom_buffer), ERL_NIF_UTF8)) {
+                // Key is an atom ('key')
+                as_key = (as_val*)as_string_new_strdup(atom_buffer); // strdup creates a copy
+            } else if (enif_get_string(env, key, string_buffer, sizeof(string_buffer), ERL_NIF_UTF8)) {
+                // Key is a string ("key") - character list
+                as_key = (as_val*)as_string_new_strdup(string_buffer); // strdup creates a copy
+            } else {
+                // Unsupported key type - keys must be atoms, strings, or binaries
+                enif_map_iterator_destroy(env, &iter);
+                as_orderedmap_destroy(&as_map_data);
+                return enif_make_badarg(env);
+            }
+
+            // Convert value to as_val - only handle binary/string data as expected by binary_get_sync
+            as_val* as_value = NULL;
+            ErlNifBinary value_binary;
+
+            if (enif_inspect_binary(env, value, &value_binary)) {
+                // Value is a binary - store as bytes
+                uint8_t* value_data = (uint8_t*)malloc(value_binary.size);
+                if (!value_data) {
+                    // Memory allocation failed
+                    as_val_destroy(as_key);
+                    enif_map_iterator_destroy(env, &iter);
+                    as_orderedmap_destroy(&as_map_data);
+                    return enif_make_badarg(env);
+                }
+                memcpy(value_data, value_binary.data, value_binary.size);
+                as_value = (as_val*)as_bytes_new_wrap(value_data, value_binary.size, true);
+            } else {
+                // Unsupported value type - only binary/string values are supported
+                as_val_destroy(as_key);
+                enif_map_iterator_destroy(env, &iter);
+                as_orderedmap_destroy(&as_map_data);
+                return enif_make_badarg(env);
+            }
+
+            // Add the key-value pair to the ordered map
+            if (as_orderedmap_set(&as_map_data, as_key, as_value) != 0) {
+                // Failed to set - clean up and return error
+                as_val_destroy(as_key);
+                as_val_destroy(as_value);
+                enif_map_iterator_destroy(env, &iter);
+                as_orderedmap_destroy(&as_map_data);
+                return enif_make_badarg(env);
+            }
+
+            // Move to next pair
+            if (!enif_map_iterator_next(env, &iter)) {
+                break;
+            }
+        }
+
+        enif_map_iterator_destroy(env, &iter);
+    }
+
+    // Set the map in the record
+    bool map_set_success = as_record_set_map(&rec, bin_name.c_str(), (as_map*)&as_map_data);
+
+    if (!map_set_success) {
+        as_orderedmap_destroy(&as_map_data);
+        return enif_make_badarg(env);
+    }
+
+    as_error err;
+    as_status status = aerospike_key_put(as, &err, NULL, &record_key, &rec);
+
+    // Clean up the ordered map after the put operation
+    as_orderedmap_destroy(&as_map_data);
+
+    ERL_NIF_TERM return_data;
+    if (status != AEROSPIKE_OK) {
+        ERL_NIF_TERM error_msg;
+        if (strlen(err.message) != 0) {
+            error_msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
+        } else {
+            error_msg = enif_make_string(env, "Unknown error occurred", ERL_NIF_UTF8);
+        }
+        auto nifErrorCode = enif_make_int(env, ASPIKE_NIF_OK);
+        auto aspikeErrorCode = enif_make_int(env, err.code);
+        ERL_NIF_TERM error_tuple = enif_make_tuple3(env, nifErrorCode, aspikeErrorCode, error_msg);
+
+        return_data = enif_make_tuple2(env, erl_error, error_tuple);
+    } else {
+        return_data = enif_make_tuple2(env, erl_ok, enif_make_atom(env, "done"));
+    }
+
+    return return_data;
+}

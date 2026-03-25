@@ -648,6 +648,7 @@ static ErlNifFunc nif_funcs[] = {
     {"cdt_get_bin_async", 5, aspike_nif_cdt_get_bin_async},
     NIF_DIRTY_FUN("key_select", 4, aspike_nif_key_select_sync),
     NIF_DIRTY_FUN("binary_get", 3, aspike_nif_binary_get_sync),
+    NIF_DIRTY_FUN("map_put", 6, aspike_nif_map_put_sync),
     NIF_DIRTY_FUN("key_get", 3, aspike_nif_key_get_sync),
     NIF_DIRTY_FUN("key_exists", 3, aspike_nif_key_exists_sync),
     NIF_DIRTY_FUN("key_inc", 4, aspike_nif_key_inc_sync),
