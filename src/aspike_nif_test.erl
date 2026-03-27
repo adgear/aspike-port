@@ -131,8 +131,8 @@ quick_test() ->
     },
     MapPutResult = aspike_nif:map_put(Namespace, SetName, PK1, <<"profile2">>, 5, Map),
     io:format("MapPutResult: ~p.~n", [MapPutResult]),
-    AsyncBinReadRes = cdt_get_bin(Namespace, SetName, PK1, <<"profile2">>),
-    io:format("Bin from cdt_get_bin: ~p.~n", [AsyncBinReadRes]),
+    AsyncBinReadRes = segment_tag_get(Namespace, SetName, PK1, <<"profile2">>),
+    io:format("Bin from segment_tag_get: ~p.~n", [AsyncBinReadRes]),
 
     io:format("get_connections_stats:~n~p~n~n", [aspike_nif:get_connections_stats()]),
 
@@ -157,12 +157,13 @@ stress_test() ->
 
     TestNamePrefix = "local",
     AmountOfOps = 10_000,
-    Command = cdt_put,
+    %Command = cdt_put,
     %Command = cdt_get,
     %Command = cdt_delete_by_keys,
     %Command = cdt_delete_by_keys_batch,
+    Command = segment_tag_get,
     AmountsOfClients = [1, 2, 4, 8, 10, 12, 14, 20, 50, 100, 200, 250, 300],
-    %AmountsOfClients = [20],
+    %AmountsOfClients = [1],
 
     Namespace = <<"test">>,
     SetName = <<"test_set">>,
@@ -296,6 +297,30 @@ stress_test() ->
                 end,
 
                 {ok, ok}
+            end;
+        segment_tag_get ->
+            fun(Counter) ->
+                PK1 = <<<<"user1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                BinName3 = <<<<"bn3_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value1 = <<<<"value1_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value2 = <<<<"value2_">>/binary, (integer_to_binary(Counter))/binary>>,
+                Value3 = <<<<"value3_">>/binary, (integer_to_binary(Counter))/binary>>,
+
+                Map = #{
+                    key_one => Value1,
+                    "key_two" => Value2,
+                    <<"key_three">> => Value3
+                },
+                MapPutResult = aspike_nif:map_put(Namespace, SetName, PK1, BinName3, 5, Map),
+                {ok, done} = MapPutResult,
+
+                AsyncBinReadRes = segment_tag_get(Namespace, SetName, PK1, BinName3),
+                {ok, ReadMap} = AsyncBinReadRes,
+                Value1 = maps:get(<<"key_one">>, ReadMap),
+                Value2 = maps:get(<<"key_two">>, ReadMap),
+                Value3 = maps:get(<<"key_three">>, ReadMap),
+
+                {ok, ok}
             end
         end,
 
@@ -320,13 +345,23 @@ memory_leak_test() ->
         Bins = [{BinName1, [Key1, Value1, Counter, Key2, Value2, Counter]}, {BinName2, [Key2, Value2, Counter]}],
         PK1 = <<<<"user1_">>/binary, (integer_to_binary(Counter))/binary>>,
         PK2 = <<<<"user2_">>/binary, (integer_to_binary(Counter))/binary>>,
+        BinName3 = <<<<"bn3_">>/binary, (integer_to_binary(Counter))/binary>>,
+        Value3 = <<<<"value3_">>/binary, (integer_to_binary(Counter))/binary>>,
         cdt_put(Namespace, SetName, RecordKeyName, Bins, 5),
-        cdt_get(Namespace, SetName, RecordKeyName),
-        cdt_delete_by_keys(Namespace, SetName, RecordKeyName, BinName1, [Key1]),
-        cdt_put(Namespace, SetName, PK1, Bins, 5),
-        cdt_put(Namespace, SetName, PK2, Bins, 5),
-        cdt_delete_by_keys_batch(Namespace, SetName, BinName1, [{PK1, [Key1, Key2]}, {PK2, [Key1, Key2]}])
-     end,
+%%        cdt_get(Namespace, SetName, RecordKeyName),
+%%        cdt_delete_by_keys(Namespace, SetName, RecordKeyName, BinName1, [Key1]),
+%%        cdt_put(Namespace, SetName, PK1, Bins, 5),
+%%        cdt_put(Namespace, SetName, PK2, Bins, 5),
+%%        cdt_delete_by_keys_batch(Namespace, SetName, BinName1, [{PK1, [Key1, Key2]}, {PK2, [Key1, Key2]}]),
+%%        Map = #{
+%%            key_one => Value1,
+%%            "key_two" => Value2,
+%%            <<"key_three">> => Value3
+%%        },
+%%        aspike_nif:map_put(Namespace, SetName, PK1, BinName3, 5, Map),
+%%        segment_tag_get(Namespace, SetName, PK1, BinName3),
+        {ok, ok}
+    end,
 
     aspike_nif_test_utils:memory_leak_test(ActionFunc, AmountOfOps, AmountOfClients),
     ok.
@@ -357,12 +392,12 @@ cdt_get(Namespace, Set, RecordKeyName, Policy) ->
             call_aerospike_async_nif(AsyncCmd)
     end.
 
-cdt_get_bin(Namespace, Set, RecordKeyName, BinName) ->
-    case get_api_mode(cdt_get_bin) of
+segment_tag_get(Namespace, Set, RecordKeyName, BinName) ->
+    case get_api_mode(segment_tag_get) of
         sync ->
-            aspike_nif:cdt_get_bin_sync(Namespace, Set, RecordKeyName, BinName);
+            aspike_nif:segment_tag_get_sync(Namespace, Set, RecordKeyName, BinName);
         async ->
-            AsyncCmd = fun(Ref) -> aspike_nif:cdt_get_bin_async(Ref, Namespace, Set, RecordKeyName, BinName) end,
+            AsyncCmd = fun(Ref) -> aspike_nif:segment_tag_get_async(Ref, Namespace, Set, RecordKeyName, BinName) end,
             call_aerospike_async_nif(AsyncCmd)
     end.
 

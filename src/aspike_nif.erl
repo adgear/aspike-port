@@ -70,8 +70,8 @@
     cdt_put_async/7,
     cdt_get_sync/4,
     cdt_get_async/5,
-    cdt_get_bin_sync/4,
-    cdt_get_bin_async/5
+    segment_tag_get_sync/4,
+    segment_tag_get_async/5
 ]).
 
 -nifs([
@@ -112,8 +112,8 @@
     cdt_put_async/7,
     cdt_get_sync/4,
     cdt_get_async/5,
-    cdt_get_bin_sync/4,
-    cdt_get_bin_async/5
+    segment_tag_get_sync/4,
+    segment_tag_get_async/5
 ]).
 
 % -------------------------------------------------------------------------------
@@ -338,12 +338,12 @@ binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_bi
 map_put(_Namespace, _Set, _RecordKey, _BinName, _TTL, _Map) ->
     not_loaded(?LINE).
 
--spec cdt_get_bin_sync(binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
-cdt_get_bin_sync(Namespace, Set, Key, BinName) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(BinName) ->
+-spec segment_tag_get_sync(binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
+segment_tag_get_sync(Namespace, Set, Key, BinName) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(BinName) ->
     not_loaded(?LINE).
 
--spec cdt_get_bin_async(reference(), binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
-cdt_get_bin_async(_Ref, _Namespace, _Set, _Key, _BinName) ->
+-spec segment_tag_get_async(reference(), binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
+segment_tag_get_async(_Ref, _Namespace, _Set, _Key, _BinName) ->
     not_loaded(?LINE).
 
 -spec cdt_expire(binary(), binary(), binary(), integer()) -> {ok, [{binary(), term()}]} | {error, string()}.

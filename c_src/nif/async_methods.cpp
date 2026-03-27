@@ -922,7 +922,7 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_batch_async(ErlNifEnv* env, int argc,
     return return_data;
 }
 
-void cdt_get_bin_async_callback(as_error* err, as_record* records, void* udata, as_event_loop* event_loop) {
+void segment_tag_get_async_callback(as_error* err, as_record* records, void* udata, as_event_loop* event_loop) {
     callback_data* cb_data = (callback_data*)udata;
 
     ERL_NIF_TERM erl_ok = enif_make_atom(cb_data->erl_env, "ok");
@@ -1018,7 +1018,7 @@ void cdt_get_bin_async_callback(as_error* err, as_record* records, void* udata, 
     delete cb_data;
 }
 
-ERL_NIF_TERM aspike_nif_cdt_get_bin_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
+ERL_NIF_TERM aspike_nif_segment_tag_get_async(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     static aerospike* as = get_aerospike();
     bool is_connected = get_is_connected();
     ERL_NIF_TERM erl_ok = enif_make_atom(env, "ok");
@@ -1061,7 +1061,7 @@ ERL_NIF_TERM aspike_nif_cdt_get_bin_async(ErlNifEnv* env, int argc, const ERL_NI
     cb_data->bin_name = bin_name;
 
     as_error err;
-    as_status status = aerospike_key_select_async(as, &err, nullptr, record_key, bins_to_read, cdt_get_bin_async_callback, cb_data, nullptr, nullptr);
+    as_status status = aerospike_key_select_async(as, &err, nullptr, record_key, bins_to_read, segment_tag_get_async_callback, cb_data, nullptr, nullptr);
 
     ERL_NIF_TERM return_data;
     if (status != AEROSPIKE_OK) {
