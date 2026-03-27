@@ -132,12 +132,15 @@ struct callback_data {
         }
         if (arraylist) {
             as_arraylist_destroy(arraylist);
+            delete arraylist;
         }
         if (operations) {
             as_operations_destroy(operations);
+            delete operations;
         }
         if (record_key) {
             as_key_destroy(record_key);
+            delete record_key;
         }
         if (erl_env) {
             enif_free_env(erl_env);
@@ -293,9 +296,6 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
 
     CHECK_ALL
 
-    as_map_policy put_mode;
-    as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
-
     auto node_name = get_target_node_for_key(name_space.c_str(), set_name.c_str(), record_name.c_str());
 
     auto record_key = new as_key();
@@ -308,6 +308,9 @@ ERL_NIF_TERM aspike_nif_cdt_put_async(ErlNifEnv* env, int argc, const ERL_NIF_TE
     cb_data->operations = operations;
     cb_data->record_key = record_key;
     cb_data->cdt_context_vector = cdt_contexts;
+
+    as_map_policy put_mode;
+    as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
     for (uint i = 0; i < bins_amount; i++) {
         // each bin of
@@ -586,7 +589,6 @@ static void cdt_delete_by_keys_async_callback(as_error* err, as_record* record, 
     ERL_NIF_TERM erl_error = enif_make_atom(cb_data->erl_env, "error");
     ERL_NIF_TERM result_msg;
 
-
     if (cb_data->node_name) {
         decrement_async_connection_counter_with_node(cb_data->node_name);
     }
@@ -663,9 +665,9 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_async(ErlNifEnv* env, int argc, const
     auto record_key = new as_key();
     as_key_init_str(record_key, name_space.c_str(), set_name.c_str(), record_name.c_str());
 
-    auto ops = new as_operations();
-    as_operations_init(ops, 1);
-    ops->ttl = AS_RECORD_NO_CHANGE_TTL;  // Preserve existing record TTL (-2)
+    auto operations = new as_operations();
+    as_operations_init(operations, 1);
+    operations->ttl = AS_RECORD_NO_CHANGE_TTL;  // Preserve existing record TTL (-2)
     as_map_policy put_mode;
     as_map_policy_set(&put_mode, AS_MAP_KEY_ORDERED, AS_MAP_UPDATE);
 
@@ -691,17 +693,17 @@ ERL_NIF_TERM aspike_nif_cdt_delete_by_keys_async(ErlNifEnv* env, int argc, const
     // we need to be sure we put all keys into the list, otherwise the behavior
     // of operation can be undefined as we defined the length of keys to remove
     if (subkeys_num == length) {
-        as_operations_add_map_remove_by_key_list(ops, bin_name.c_str(), (as_list*)remove_list, AS_MAP_RETURN_NONE);
+        as_operations_add_map_remove_by_key_list(operations, bin_name.c_str(), (as_list*)remove_list, AS_MAP_RETURN_NONE);
     }
 
     PREP_CALLBACK
     cb_data->node_name = node_name;
-    cb_data->operations = ops;
+    cb_data->operations = operations;
     cb_data->arraylist = remove_list;
     cb_data->record_key = record_key;
 
     as_error err;
-    as_status status = aerospike_key_operate_async(as, &err, NULL, record_key, ops, cdt_delete_by_keys_async_callback, cb_data, NULL, NULL);
+    as_status status = aerospike_key_operate_async(as, &err, NULL, record_key, operations, cdt_delete_by_keys_async_callback, cb_data, NULL, NULL);
 
     ERL_NIF_TERM return_data;
     if (status != AEROSPIKE_OK) {

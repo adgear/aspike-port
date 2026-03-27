@@ -1555,6 +1555,11 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     if (!enif_is_map(env, erl_map)) {
 	    return enif_make_badarg(env);
     }
+    // Get the map size for initialization
+    size_t map_size;
+    if (!enif_get_map_size(env, erl_map, &map_size)) {
+        return enif_make_badarg(env);
+    }
     
     CHECK_ALL
     
@@ -1572,12 +1577,6 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
     as_record rec;
     as_record_inita(&rec, 1);
     rec.ttl = ttl;
-
-    // Get the map size for initialization
-    size_t map_size;
-    if (!enif_get_map_size(env, erl_map, &map_size)) {
-        return enif_make_badarg(env);
-    }
 
     // Create an ordered map to hold the Erlang map data
     as_orderedmap as_map_data;
@@ -1598,12 +1597,6 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
             if (enif_inspect_binary(env, key, &key_binary)) {
                 // Key is a binary (<<"key">>)
                 char* key_str = (char*)malloc(key_binary.size + 1);
-                if (!key_str) {
-                    // Memory allocation failed
-                    enif_map_iterator_destroy(env, &iter);
-                    as_orderedmap_destroy(&as_map_data);
-                    return enif_make_badarg(env);
-                }
                 memcpy(key_str, key_binary.data, key_binary.size);
                 key_str[key_binary.size] = '\0';
                 as_key = (as_val*)as_string_new(key_str, true); // true means Aerospike will free the memory
@@ -1617,6 +1610,8 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
                 // Unsupported key type - keys must be atoms, strings, or binaries
                 enif_map_iterator_destroy(env, &iter);
                 as_orderedmap_destroy(&as_map_data);
+                as_record_destroy(&rec);
+                as_key_destroy(&record_key);
                 return enif_make_badarg(env);
             }
 
@@ -1627,13 +1622,6 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
             if (enif_inspect_binary(env, value, &value_binary)) {
                 // Value is a binary - store as bytes
                 uint8_t* value_data = (uint8_t*)malloc(value_binary.size);
-                if (!value_data) {
-                    // Memory allocation failed
-                    as_val_destroy(as_key);
-                    enif_map_iterator_destroy(env, &iter);
-                    as_orderedmap_destroy(&as_map_data);
-                    return enif_make_badarg(env);
-                }
                 memcpy(value_data, value_binary.data, value_binary.size);
                 as_value = (as_val*)as_bytes_new_wrap(value_data, value_binary.size, true);
             } else {
@@ -1641,6 +1629,8 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
                 as_val_destroy(as_key);
                 enif_map_iterator_destroy(env, &iter);
                 as_orderedmap_destroy(&as_map_data);
+                as_record_destroy(&rec);
+                as_key_destroy(&record_key);
                 return enif_make_badarg(env);
             }
 
@@ -1651,6 +1641,8 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
                 as_val_destroy(as_value);
                 enif_map_iterator_destroy(env, &iter);
                 as_orderedmap_destroy(&as_map_data);
+                as_record_destroy(&rec);
+                as_key_destroy(&record_key);
                 return enif_make_badarg(env);
             }
 
@@ -1668,6 +1660,8 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 
     if (!map_set_success) {
         as_orderedmap_destroy(&as_map_data);
+        as_record_destroy(&rec);
+        as_key_destroy(&record_key);
         return enif_make_badarg(env);
     }
 
@@ -1676,6 +1670,8 @@ ERL_NIF_TERM aspike_nif_map_put_sync(ErlNifEnv* env, int argc, const ERL_NIF_TER
 
     // Clean up the ordered map after the put operation
     as_orderedmap_destroy(&as_map_data);
+    as_record_destroy(&rec);
+    as_key_destroy(&record_key);
 
     ERL_NIF_TERM return_data;
     if (status != AEROSPIKE_OK) {

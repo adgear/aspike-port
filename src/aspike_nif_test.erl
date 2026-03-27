@@ -348,18 +348,18 @@ memory_leak_test() ->
         BinName3 = <<<<"bn3_">>/binary, (integer_to_binary(Counter))/binary>>,
         Value3 = <<<<"value3_">>/binary, (integer_to_binary(Counter))/binary>>,
         cdt_put(Namespace, SetName, RecordKeyName, Bins, 5),
-%%        cdt_get(Namespace, SetName, RecordKeyName),
-%%        cdt_delete_by_keys(Namespace, SetName, RecordKeyName, BinName1, [Key1]),
-%%        cdt_put(Namespace, SetName, PK1, Bins, 5),
-%%        cdt_put(Namespace, SetName, PK2, Bins, 5),
-%%        cdt_delete_by_keys_batch(Namespace, SetName, BinName1, [{PK1, [Key1, Key2]}, {PK2, [Key1, Key2]}]),
-%%        Map = #{
-%%            key_one => Value1,
-%%            "key_two" => Value2,
-%%            <<"key_three">> => Value3
-%%        },
-%%        aspike_nif:map_put(Namespace, SetName, PK1, BinName3, 5, Map),
-%%        segment_tag_get(Namespace, SetName, PK1, BinName3),
+        cdt_get(Namespace, SetName, RecordKeyName),
+        cdt_delete_by_keys(Namespace, SetName, RecordKeyName, BinName1, [Key1]),
+        cdt_put(Namespace, SetName, PK1, Bins, 5),
+        cdt_put(Namespace, SetName, PK2, Bins, 5),
+        cdt_delete_by_keys_batch(Namespace, SetName, BinName1, [{PK1, [Key1, Key2]}, {PK2, [Key1, Key2]}]),
+        Map = #{
+            key_one => Value1,
+            "key_two" => Value2,
+            <<"key_three">> => Value3
+        },
+        aspike_nif:map_put(Namespace, SetName, PK1, BinName3, 5, Map),
+        segment_tag_get(Namespace, SetName, PK1, BinName3),
         {ok, ok}
     end,
 
@@ -376,7 +376,7 @@ cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
         async ->
             AsyncCmd = fun(Ref) ->
                 aspike_nif:cdt_put_async(Ref, Namespace, Set, RecordKeyName, BinList, TTL, Policy)
-                       end,
+            end,
             call_aerospike_async_nif(AsyncCmd)
     end.
 
