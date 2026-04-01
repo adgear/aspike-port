@@ -2,6 +2,7 @@
 
 -export([
     init/0,
+    connection_test/0,
     quick_test/0,
     stress_test/0,
     memory_leak_test/0,
@@ -34,7 +35,16 @@
     cdt_del_batch_test/5,
     cdt_get_test/4,
     pool_cdt_insert/1,
-    pool_cdt_read/1
+    pool_cdt_read/1,
+
+    % Shared Aerospike operation functions
+    cdt_put/5,
+    cdt_put/6,
+    cdt_get/3,
+    cdt_get/4,
+    segment_tag_get/4,
+    cdt_delete_by_keys/5,
+    cdt_delete_by_keys_batch/4
 ]).
 
 -define(INIT_FLAG, aspike_nif_test_init_done).
@@ -66,10 +76,33 @@ init() ->
             aspike_nif:set_event_loops_amount(?EVENT_LOOPS_AMOUNT),
             aspike_nif:host_add(),
             aspike_nif:as_init(),
-            io:format("aspike_nif:connect: ~p~n", [aspike_nif:connect()]),
-            persistent_term:put(?INIT_FLAG, true),
-            ok;
+            ConnectionResponse = aspike_nif:connect(),
+            io:format("aspike_nif:connect: ~p~n", [ConnectionResponse]),
+            case ConnectionResponse of
+                {ok, <<"connected">>} ->
+                    persistent_term:put(?INIT_FLAG, true);
+                _ ->
+                    ok
+            end;
         _ -> ok
+    end.
+
+connection_test() ->
+    Namespace = <<"test">>,
+    SetName = <<"rtb_setname">>,
+    PK1 = <<"user_1">>,
+    Bins1 = [
+        {<<"profile">>, [<<"first_name">>, <<0, 1, 0, 2, 1>>, 123, <<"last_name">>, <<0, 1, 0, 2, 2>>, 456]},
+        {<<"settings">>, [<<"theme">>, <<0, 1, 0, 2, 3>>, 345, <<"reload">>, <<0, 1, 0, 2, 4>>, 678]}
+    ],
+    InsertRes = cdt_put(Namespace, SetName, PK1, Bins1, 300),
+    case InsertRes of
+        {ok, "put"} -> ok;
+        {ok, <<"put">>} -> ok;
+        {error, InsertError} ->
+            io:format("ERROR: cdt_put failed with: ~p~n", [InsertError]);
+        InsertOther ->
+            io:format("ERROR: cdt_put returned unexpected result: ~p~n", [InsertOther])
     end.
 
 quick_test() ->

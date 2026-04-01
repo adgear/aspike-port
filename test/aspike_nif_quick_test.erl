@@ -18,7 +18,7 @@ run() ->
 
     try
         % Test CDT put operation
-        InsertRes = cdt_put(Namespace, SetName, PK1, Bins1, 300),
+        InsertRes = aspike_nif_test:cdt_put(Namespace, SetName, PK1, Bins1, 300),
         case InsertRes of
             {ok, "put"} -> ok;
             {ok, <<"put">>} -> ok;
@@ -31,7 +31,7 @@ run() ->
         end,
 
         % Test CDT get operation and data validation
-        ReadRes = cdt_get(Namespace, SetName, PK1),
+        ReadRes = aspike_nif_test:cdt_get(Namespace, SetName, PK1),
         case ReadRes of
             {ok, ReadData} ->
                 case aspike_nif_test_utils:compare_cdt_data(Bins1, ReadData) of
@@ -50,7 +50,7 @@ run() ->
         % Test cdt_delete_by_keys functionality
         BinName = <<"profile">>,
         KeysToDelete = [<<"first_name">>, <<"last_name">>],
-        DeleteRes = cdt_delete_by_keys(Namespace, SetName, PK1, BinName, KeysToDelete),
+        DeleteRes = aspike_nif_test:cdt_delete_by_keys(Namespace, SetName, PK1, BinName, KeysToDelete),
         case DeleteRes of
             {ok, "keys_deleted"} -> ok;
             {error, DeleteError} ->
@@ -62,7 +62,7 @@ run() ->
         end,
 
         % Verify deletion by reading again
-        ReadAfterDeleteRes = cdt_get(Namespace, SetName, PK1),
+        ReadAfterDeleteRes = aspike_nif_test:cdt_get(Namespace, SetName, PK1),
         case ReadAfterDeleteRes of
             {ok, ReadAfterDeleteData} ->
                 ExpectedData = [
@@ -100,7 +100,7 @@ run() ->
         end,
 
         % Test segment_tag_get operation
-        AsyncBinReadRes = segment_tag_get(Namespace, SetName, PK1, <<"profile2">>),
+        AsyncBinReadRes = aspike_nif_test:segment_tag_get(Namespace, SetName, PK1, <<"profile2">>),
         case AsyncBinReadRes of
             {ok, ReadMap} when is_map(ReadMap) ->
                 % Verify we can read the expected values
@@ -139,89 +139,3 @@ run() ->
             halt(1)
     end.
 
-%% Helper functions - delegate to aspike_nif_test for the API functions
-cdt_put(Namespace, Set, RecordKeyName, BinList, TTL) ->
-    cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, ?ASPIKE_DEFAULT_POLICY).
-
-cdt_put(Namespace, Set, RecordKeyName, BinList, TTL, Policy) ->
-    case aspike_nif_test:get_api_mode(cdt_put) of
-        sync ->
-            aspike_nif:cdt_put_sync(Namespace, Set, RecordKeyName, BinList, TTL, Policy);
-        async ->
-            AsyncCmd = fun(Ref) ->
-                aspike_nif:cdt_put_async(Ref, Namespace, Set, RecordKeyName, BinList, TTL, Policy)
-            end,
-            call_aerospike_async_nif(AsyncCmd)
-    end.
-
-cdt_get(Namespace, Set, RecordKeyName) ->
-    cdt_get(Namespace, Set, RecordKeyName, ?ASPIKE_DEFAULT_POLICY).
-
-cdt_get(Namespace, Set, RecordKeyName, Policy) ->
-    case aspike_nif_test:get_api_mode(cdt_get) of
-        sync ->
-            aspike_nif:cdt_get_sync(Namespace, Set, RecordKeyName, Policy);
-        async ->
-            AsyncCmd = fun(Ref) -> aspike_nif:cdt_get_async(Ref, Namespace, Set, RecordKeyName, Policy) end,
-            call_aerospike_async_nif(AsyncCmd)
-    end.
-
-segment_tag_get(Namespace, Set, RecordKeyName, BinName) ->
-    case aspike_nif_test:get_api_mode(segment_tag_get) of
-        sync ->
-            aspike_nif:segment_tag_get_sync(Namespace, Set, RecordKeyName, BinName);
-        async ->
-            AsyncCmd = fun(Ref) -> aspike_nif:segment_tag_get_async(Ref, Namespace, Set, RecordKeyName, BinName) end,
-            call_aerospike_async_nif(AsyncCmd)
-    end.
-
-cdt_delete_by_keys(Namespace, Set, RecordKeyName, BinName, SubkeysList) ->
-    case aspike_nif_test:get_api_mode(cdt_delete_by_keys) of
-        sync ->
-            aspike_nif:cdt_delete_by_keys_sync(Namespace, Set, RecordKeyName, BinName, SubkeysList);
-        async ->
-            AsyncCmd = fun(Ref) ->
-                aspike_nif:cdt_delete_by_keys_async(Ref, Namespace, Set, RecordKeyName, BinName, SubkeysList)
-                       end,
-            call_aerospike_async_nif(AsyncCmd)
-    end.
-
-call_aerospike_async_nif(AsyncCmd) ->
-    % Generate a unique reference for this async operation
-    Ref = make_ref(),
-
-    % we define time to wait (TTW) much higher compare to prod values
-    % because dev machines are not so powerful. Value in milliseconds.
-    TTW = 1000,
-
-    case AsyncCmd(Ref) of
-        {ok, in_progress} ->
-            receive_with_ref_filter(Ref, TTW);
-        {ok, Response} ->
-            {ok, Response};
-        {error, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} ->
-            {error, ErrorMessage}
-    end.
-
-% Helper function to receive messages with reference filtering
-receive_with_ref_filter(ExpectedRef, TTW) ->
-    receive
-        {ok, ReceivedRef, Response} when ReceivedRef =:= ExpectedRef ->
-            {ok, Response};
-        {error, ReceivedRef, {_NifErrorCode, _AspikeErrorCode, ErrorMessage}} when ReceivedRef =:= ExpectedRef ->
-            {error, ErrorMessage};
-        % Handle messages with wrong references (stale messages)
-        {ok, WrongRef, _} when WrongRef =/= ExpectedRef ->
-            % This is a stale message from a previous operation, ignore it
-            io:format("Received wrong REF (~p) on OK response. I was expecting ~p~n", [WrongRef, ExpectedRef]),
-            receive_with_ref_filter(ExpectedRef, TTW);
-        {error, WrongRef, {_, _, _}} when WrongRef =/= ExpectedRef ->
-            io:format("Received wrong REF (~p) on Error response. I was expecting ~p~n", [WrongRef, ExpectedRef]),
-            % This is a stale error message from a previous operation, ignore it
-            receive_with_ref_filter(ExpectedRef, TTW);
-        _Other ->
-            % Unknown message format, ignore and continue
-            receive_with_ref_filter(ExpectedRef, TTW)
-    after TTW ->
-        {error, <<"timeout waiting for the response from aerospike">>}
-    end.
