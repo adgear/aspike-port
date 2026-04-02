@@ -99,6 +99,13 @@ static ERL_NIF_TERM as_init(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     if (!is_aerospike_initialised) {
         as_config config;
         as_config_init(&config);
+
+        // enable constant auto-connection to the cluster no matter what.
+        // as a side-effect, the aerospike_connect() function will report
+        // "connected" even despite a fact the aerospike cluster might be down
+        // currently.
+        config.fail_if_not_connected = false;
+        
         aerospike_init(&as, &config);
         is_aerospike_initialised = true;
     }
