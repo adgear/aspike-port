@@ -338,11 +338,11 @@ binary_get(Namespace, Set, Key) when is_binary(Namespace), is_binary(Set), is_bi
 map_put(_Namespace, _Set, _RecordKey, _BinName, _TTL, _Map) ->
     not_loaded(?LINE).
 
--spec segment_tag_get_sync(binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
+-spec segment_tag_get_sync(binary(), binary(), binary(), binary()) -> {ok, binary() | map()} | {error, string()} | {error, integer(), string()}.
 segment_tag_get_sync(Namespace, Set, Key, BinName) when is_binary(Namespace), is_binary(Set), is_binary(Key), is_binary(BinName) ->
     not_loaded(?LINE).
 
--spec segment_tag_get_async(reference(), binary(), binary(), binary(), binary()) -> {ok, integer(), binary() | map()} | {error, string()} | {error, integer(), string()}.
+-spec segment_tag_get_async(reference(), binary(), binary(), binary(), binary()) -> {ok, binary() | map()} | {error, string()} | {error, integer(), string()}.
 segment_tag_get_async(_Ref, _Namespace, _Set, _Key, _BinName) ->
     not_loaded(?LINE).
 

@@ -651,11 +651,10 @@ ERL_NIF_TERM aspike_nif_segment_tag_get_sync(ErlNifEnv* env, int argc, const ERL
     }
 
     rc = erl_ok;
-    code = enif_make_int(env, int(AEROSPIKE_OK));
     if (p_rec != NULL) {
         as_record_destroy(p_rec);
     }
-    return enif_make_tuple3(env, rc, code, res);
+    return enif_make_tuple2(env, rc, res);
 }
 
 ERL_NIF_TERM aspike_nif_key_select_sync(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
