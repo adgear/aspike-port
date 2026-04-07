@@ -165,7 +165,7 @@ connect() ->
     connect(?DEFAULT_USER, ?DEFAULT_PSW).
 
 % @doc Create connection using User and PWd credential
--spec connect(string(), string()) -> {ok, string()} | {error, string()}.
+-spec connect(string(), string()) -> {ok, atom()} | {error, string()}.
 connect(_, _) ->
     not_loaded(?LINE).
 

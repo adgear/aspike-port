@@ -171,6 +171,19 @@ static ERL_NIF_TERM host_list(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
     return enif_make_tuple2(env, erl_ok, msg);
 }
 
+// -spec connect(User :: string(), Password :: string()) ->
+//     {ok, atom()} |
+//     {error, string()}.
+//
+// Connects to Aerospike cluster with authentication.
+// Unlike basic aerospike_connect(), this function verifies that the cluster
+// has active, responding servers using aerospike_cluster_is_connected().
+//
+// Returns:
+//   {ok, connected} - Successfully connected with active servers available
+//   {ok, no_active_servers_found} - In cluster connected state but no active
+//          aerospike servers are found, thus, the cluster is empty.
+//   {error, ErrorMessage} - Connection failed with error description
 static ERL_NIF_TERM connect(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     char user[AS_USER_SIZE];
@@ -184,21 +197,31 @@ static ERL_NIF_TERM connect(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     }
     CHECK_AEROSPIKE_INIT
 
-    ERL_NIF_TERM rc, msg;
     as_config_set_user(&as.config, user, password);
-	as_error err;
 
-    if (aerospike_connect(&as, &err) != AEROSPIKE_OK) {
-        rc = erl_error;
-        msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
+    as_error err;
+    ERL_NIF_TERM response;
+    as_status rc = aerospike_connect(&as, &err);
+    if (rc != AEROSPIKE_OK) {
         is_connected = false;
+        ERL_NIF_TERM error_msg = enif_make_string(env, err.message, ERL_NIF_UTF8);
+        
+        response = enif_make_tuple2(env, erl_error, error_msg);
     } else {
-        rc = erl_ok;
-        msg = enif_make_string(env, "connected", ERL_NIF_UTF8);
         is_connected = true;
+        // Check if we're actually connected to live servers
+        // aerospike_connect() succeeds even with fail_if_not_connected=false
+        // but this checks if cluster has active, responding nodes
+        ERL_NIF_TERM status;
+        if (aerospike_cluster_is_connected(&as)) {
+            status = enif_make_atom(env, "connected");
+        } else {
+            status = enif_make_atom(env, "no_active_servers_found");
+        }
+        response = enif_make_tuple2(env, erl_ok, status);
     }
 
-    return enif_make_tuple2(env, rc, msg);
+    return response;
 }
 
 static ERL_NIF_TERM binary_remove(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])

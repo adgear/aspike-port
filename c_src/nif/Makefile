@@ -41,7 +41,7 @@ CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR)
 
 LDLIBS += $(AERO_BASE)/lib/libaerospike.a
 LDLIBS += -L$(ERL_INTERFACE_LIB_DIR) -lei 
-LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lev -lssl -lcrypto  -lpthread -lm -lz  -lm -lz  -lstdc++
+LDLIBS += -L/usr/local/lib -L/usr/local/opt/openssl/lib -lev -lssl -lcrypto  -lpthread -lm -lz  -lm -lz -lstdc++ -lyaml
 LDFLAGS += -shared
 
 # Verbosity.
