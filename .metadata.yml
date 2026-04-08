@@ -1,0 +1,13 @@
+metadata:
+  name: aspike-port
+  description: "Erlang Library for Aerospike"
+  labels:
+    jira-project: DEGA
+    jira-board: 1778
+  links:
+    - url: https://adgear.atlassian.net/browse/DEGA-1778
+      title: Aerospike libraries integration with rtb-gateway
+spec:
+  owner: cg-dsp-bidding-systems
+  type:  library
+  lifecycle:  production
